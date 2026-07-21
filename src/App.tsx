@@ -44,6 +44,10 @@ const EventList = lazy(() => import('./pages/events/list').then((m) => ({ defaul
 const EventCreate = lazy(() => import('./pages/events/create').then((m) => ({ default: m.EventCreate })))
 const EventEdit = lazy(() => import('./pages/events/edit').then((m) => ({ default: m.EventEdit })))
 
+const SprocketImport = lazy(() =>
+  import('./pages/sprocket-import').then((m) => ({ default: m.SprocketImport })),
+)
+
 const LogSession = lazy(() =>
   import('./pages/coach/log-session').then((m) => ({ default: m.LogSession })),
 )
@@ -91,6 +95,7 @@ const AdminRoutes = () => (
         <Route path="create" element={<EventCreate />} />
         <Route path="edit/:id" element={<EventEdit />} />
       </Route>
+      <Route path="/sprocket-import" element={<SprocketImport />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
   </ThemedLayout>
@@ -168,6 +173,11 @@ function App() {
                   create: '/events/create',
                   edit: '/events/edit/:id',
                   meta: { label: 'Events' },
+                },
+                {
+                  name: 'sprocket-import',
+                  list: '/sprocket-import',
+                  meta: { label: 'Import Calendar' },
                 },
               ]}
               options={{
