@@ -19,6 +19,7 @@ dist-ssr
 
 # Personal Claude Code settings (not shared config)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Editor directories and files
 .vscode/*
