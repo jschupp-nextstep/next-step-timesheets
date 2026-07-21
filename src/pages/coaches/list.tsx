@@ -6,6 +6,7 @@ type Coach = {
   id: string
   name: string
   initials: string
+  email: string | null
   is_active: boolean
 }
 
@@ -21,6 +22,7 @@ export const CoachList = () => {
       <Table {...tableProps} rowKey="id">
         <Table.Column dataIndex="name" title="Name" />
         <Table.Column dataIndex="initials" title="Initials" />
+        <Table.Column dataIndex="email" title="Email" render={(v) => v ?? '—'} />
         <Table.Column
           dataIndex="is_active"
           title="Status"

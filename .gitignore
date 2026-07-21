@@ -21,11 +21,13 @@ dist-ssr
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# Real payroll data (coach names, pay rates) — never commit to this public repo
+# Real payroll/operational data (coach names, pay rates, schedules) —
+# never commit to this public repo
 real_data.xlsx
 real_data.numbers
 supabase/seed_real_data.sql
 scripts/generate_real_data_import.py
+*Calendar.csv
 
 # Editor directories and files
 .vscode/*

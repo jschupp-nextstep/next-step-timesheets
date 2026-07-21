@@ -13,6 +13,14 @@ export const CoachEdit = () => {
         <Form.Item label="Initials" name="initials" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
+        <Form.Item
+          label="Email"
+          name="email"
+          rules={[{ type: 'email' }]}
+          extra="Lets this coach log in. Type their email here, then use Supabase's Invite user action for the same address."
+        >
+          <Input />
+        </Form.Item>
         <Form.Item label="Active" name="is_active" valuePropName="checked">
           <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
         </Form.Item>
