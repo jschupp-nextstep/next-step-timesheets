@@ -2,7 +2,7 @@ import { Authenticated, Refine } from '@refinedev/core'
 import { AuthPage, ErrorComponent, ThemedLayout, useNotificationProvider } from '@refinedev/antd'
 import { dataProvider } from '@refinedev/supabase'
 import routerBindings, { DocumentTitleHandler, NavigateToResource } from '@refinedev/react-router'
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router'
+import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router'
 import { App as AntdApp, ConfigProvider } from 'antd'
 
 import '@refinedev/antd/dist/reset.css'
@@ -32,7 +32,7 @@ import { EventEdit } from './pages/events/edit'
 
 function App() {
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
+    <HashRouter>
       <ConfigProvider>
         <AntdApp>
           <ErrorBoundary>
@@ -150,7 +150,7 @@ function App() {
           </ErrorBoundary>
         </AntdApp>
       </ConfigProvider>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
 
