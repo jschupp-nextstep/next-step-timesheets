@@ -17,6 +17,7 @@
     "@refinedev/supabase": "^6.0.2",
     "@supabase/supabase-js": "^2.110.7",
     "antd": "^5.29.3",
+    "dayjs": "^1.11.21",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router": "^7.18.1"
