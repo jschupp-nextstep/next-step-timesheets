@@ -154,11 +154,10 @@ function App() {
                       </Authenticated>
                     }
                   >
-                    <Route
-                      path="/login"
-                      element={<AuthPage type="login" registerLink={false} forgotPasswordLink={false} />}
-                    />
+                    <Route path="/login" element={<AuthPage type="login" registerLink={false} />} />
+                    <Route path="/forgot-password" element={<AuthPage type="forgotPassword" />} />
                   </Route>
+                  <Route path="/update-password" element={<AuthPage type="updatePassword" />} />
                   <Route path="*" element={<ErrorComponent />} />
                 </Routes>
               </Suspense>
