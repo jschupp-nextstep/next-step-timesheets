@@ -38,6 +38,7 @@ export type LocationBlock = {
   locationName: string
   label: string
   dates: string[]
+  isCampProgram: boolean
 }
 
 export type LocationBlockResolution = {
@@ -58,37 +59,56 @@ function formatDateLabel(isoDate: string): string {
   return dayjs(isoDate).format('MMM D')
 }
 
+// Some Sprocket rows (e.g. remote "Video Analysis" sessions) legitimately
+// carry no location at all -- rather than silently dropping them, group them
+// under a single placeholder name so they still show up for manual mapping
+// like any other unresolved location. Used consistently for both building
+// and looking up blocks, so a blank locationName still resolves correctly.
+function normalizeLocationName(locationName: string): string {
+  return locationName || '(no location on Sprocket)'
+}
+
 export function groupEventsByLocationBlock(events: ParsedEvent[]): LocationBlockResolution {
-  const datesByLocation = new Map<string, Set<string>>()
+  // Camp dates and non-Camp dates are tracked separately per location, since
+  // only Camp locations need date-range splitting at all (our system ties
+  // specific hours to a specific camp week). A Regular location (Annual
+  // Program, Futsal, etc.) is just a reusable physical site -- one location
+  // record covers every date it's used, so those dates always collapse into
+  // a single block regardless of gaps.
+  const campDatesByLocation = new Map<string, Set<string>>()
+  const regularDatesByLocation = new Map<string, Set<string>>()
   for (const event of events) {
-    if (!event.locationName) continue
-    if (!datesByLocation.has(event.locationName)) {
-      datesByLocation.set(event.locationName, new Set())
-    }
-    datesByLocation.get(event.locationName)?.add(event.eventDate)
+    const locationName = normalizeLocationName(event.locationName)
+    const target = event.programName === 'Camps' ? campDatesByLocation : regularDatesByLocation
+    if (!target.has(locationName)) target.set(locationName, new Set())
+    target.get(locationName)?.add(event.eventDate)
   }
 
   const blocks: LocationBlock[] = []
   const blockKeyByLocationDate = new Map<string, string>()
 
-  for (const [locationName, dateSet] of datesByLocation) {
+  const addBlock = (locationName: string, blockIndex: number, dates: string[], isCampProgram: boolean) => {
+    const key = `${locationName}::${isCampProgram ? 'camp' : 'regular'}::${blockIndex}`
+    const first = dates[0]
+    const last = dates[dates.length - 1]
+    const label =
+      first === last
+        ? `${locationName} (${formatDateLabel(first)})`
+        : `${locationName} (${formatDateLabel(first)} – ${formatDateLabel(last)})`
+    blocks.push({ key, locationName, label, dates, isCampProgram })
+    for (const date of dates) {
+      blockKeyByLocationDate.set(`${locationName}|${date}`, key)
+    }
+  }
+
+  for (const [locationName, dateSet] of campDatesByLocation) {
     const sortedDates = Array.from(dateSet).sort()
     let currentBlockDates: string[] = []
     let blockIndex = 0
 
     const flush = () => {
       if (currentBlockDates.length === 0) return
-      const key = `${locationName}::${blockIndex}`
-      const first = currentBlockDates[0]
-      const last = currentBlockDates[currentBlockDates.length - 1]
-      const label =
-        first === last
-          ? `${locationName} (${formatDateLabel(first)})`
-          : `${locationName} (${formatDateLabel(first)} – ${formatDateLabel(last)})`
-      blocks.push({ key, locationName, label, dates: [...currentBlockDates] })
-      for (const date of currentBlockDates) {
-        blockKeyByLocationDate.set(`${locationName}|${date}`, key)
-      }
+      addBlock(locationName, blockIndex, [...currentBlockDates], true)
       blockIndex += 1
       currentBlockDates = []
     }
@@ -109,10 +129,39 @@ export function groupEventsByLocationBlock(events: ParsedEvent[]): LocationBlock
     flush()
   }
 
+  for (const [locationName, dateSet] of regularDatesByLocation) {
+    addBlock(locationName, 0, Array.from(dateSet).sort(), false)
+  }
+
   return {
     blocks,
-    keyForEvent: (locationName, eventDate) => blockKeyByLocationDate.get(`${locationName}|${eventDate}`) ?? '',
+    keyForEvent: (locationName, eventDate) =>
+      blockKeyByLocationDate.get(`${normalizeLocationName(locationName)}|${eventDate}`) ?? '',
   }
+}
+
+// There's no single "Camp" program in our system -- a coach's rate depends
+// on whether the specific session they worked was a half day or full day.
+// Since a location stores both possible hour values, the event's own
+// start/end span tells us which one actually applies: pick whichever of the
+// location's two configured values it's closer to.
+export function resolveCampDayType(
+  startTime: string | null,
+  endTime: string | null,
+  location: { half_day_hours: number | null; full_day_hours: number | null },
+): 'half' | 'full' | null {
+  if (!startTime || !endTime) return null
+  if (location.half_day_hours == null && location.full_day_hours == null) return null
+
+  const start = dayjs(`2000-01-01T${startTime}`)
+  const end = dayjs(`2000-01-01T${endTime}`)
+  if (!start.isValid() || !end.isValid()) return null
+  const workedHours = end.diff(start, 'minute') / 60
+
+  const halfDiff = location.half_day_hours != null ? Math.abs(workedHours - location.half_day_hours) : Infinity
+  const fullDiff = location.full_day_hours != null ? Math.abs(workedHours - location.full_day_hours) : Infinity
+  if (halfDiff === Infinity && fullDiff === Infinity) return null
+  return halfDiff <= fullDiff ? 'half' : 'full'
 }
 
 // Sprocket encodes a Camp session's staff role directly in the Title suffix.
