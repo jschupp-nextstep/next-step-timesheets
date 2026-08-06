@@ -6,7 +6,15 @@ export type Identity =
   | { role: 'admin'; id: string; email: string }
   | { role: 'coach'; id: string; email: string; coachId: string; name: string }
 
-const magicLinkRedirectTo = () => `${window.location.origin}${window.location.pathname}#/update-password`
+// Deliberately no `#/update-password` here. This app uses HashRouter, and
+// Supabase delivers magic-link/recovery tokens as their own URL fragment
+// (`#access_token=...`) -- a URL only has one `#`, so appending our route
+// onto it would corrupt Supabase's fragment into unparseable garbage
+// (`/update-password#access_token` becomes the "key" instead of
+// `access_token`). Redirect to the bare origin instead and let
+// MagicLinkRedirectHandler (in App.tsx) route to /update-password once a
+// session actually exists.
+const magicLinkRedirectTo = () => `${window.location.origin}${window.location.pathname}`
 
 export const authProvider: AuthProvider = {
   login: async (params) => {

@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { Authenticated, Refine, useGetIdentity } from '@refinedev/core'
 import { ErrorComponent, ThemedLayout, useNotificationProvider } from '@refinedev/antd'
 import { dataProvider } from '@refinedev/supabase'
@@ -10,6 +10,7 @@ import '@refinedev/antd/dist/reset.css'
 
 import { supabaseClient } from './utility/supabaseClient'
 import { authProvider, type Identity } from './providers/authProvider'
+import { decodeJwtPayload } from './utility/decodeJwt'
 import { ErrorBoundary } from './ErrorBoundary'
 import { CoachLayout } from './components/CoachLayout'
 
@@ -112,10 +113,44 @@ const CoachRoutes = () => (
   </CoachLayout>
 )
 
+// Supabase's JWT records how the *current* session was actually established
+// (amr = authentication method reference) -- password, otp (magic link and
+// recovery links both verify as otp), etc. That's a far more reliable signal
+// than sniffing the landing URL: it doesn't depend on which route the
+// post-login redirect chain happened to pass through, so there's nothing to
+// race against Refine's own "already authenticated, leave /login" redirect.
+// Anyone who got in without a password sees the set-password prompt inline,
+// with "Skip for now" just dismissing it for the rest of this tab session.
+const useNeedsPassword = () => {
+  const [needsPassword, setNeedsPassword] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    supabaseClient.auth.getSession().then(({ data }) => {
+      if (cancelled) return
+      const token = data.session?.access_token
+      const payload = token ? decodeJwtPayload(token) : null
+      const amr = payload?.amr as Array<{ method?: string }> | undefined
+      const method = amr?.[0]?.method
+      setNeedsPassword(!!method && method !== 'password')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return needsPassword
+}
+
 const AuthenticatedShell = () => {
   const { data: identity, isLoading } = useGetIdentity<Identity>()
+  const needsPassword = useNeedsPassword()
+  const [skipped, setSkipped] = useState(false)
 
-  if (isLoading) return <PageLoading />
+  if (isLoading || needsPassword === null) return <PageLoading />
+  if (needsPassword && !skipped) {
+    return <UpdatePassword onSkip={() => setSkipped(true)} onSuccess={() => setSkipped(true)} />
+  }
 
   return identity?.role === 'coach' ? <CoachRoutes /> : <AdminRoutes />
 }
