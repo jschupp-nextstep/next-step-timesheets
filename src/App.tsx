@@ -4,13 +4,14 @@ import { ErrorComponent, ThemedLayout, useNotificationProvider } from '@refinede
 import { dataProvider } from '@refinedev/supabase'
 import routerBindings, { DocumentTitleHandler, NavigateToResource } from '@refinedev/react-router'
 import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router'
-import { App as AntdApp, ConfigProvider, Spin } from 'antd'
+import { Alert, App as AntdApp, Button, ConfigProvider, Spin } from 'antd'
 
 import '@refinedev/antd/dist/reset.css'
 
 import { supabaseClient } from './utility/supabaseClient'
 import { authProvider, type Identity } from './providers/authProvider'
 import { decodeJwtPayload } from './utility/decodeJwt'
+import { useVersionCheck } from './utility/useVersionCheck'
 import { ErrorBoundary } from './ErrorBoundary'
 import { CoachLayout } from './components/CoachLayout'
 
@@ -61,6 +62,25 @@ const PageLoading = () => (
     <Spin size="large" />
   </div>
 )
+
+const UpdateBanner = () => {
+  const updateAvailable = useVersionCheck()
+  if (!updateAvailable) return null
+  return (
+    <Alert
+      banner
+      type="info"
+      showIcon
+      message="A new version of this app is available."
+      action={
+        <Button size="small" type="primary" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+      }
+      style={{ position: 'sticky', top: 0, zIndex: 1000 }}
+    />
+  )
+}
 
 const AdminRoutes = () => (
   <ThemedLayout>
@@ -172,6 +192,7 @@ function App() {
     <HashRouter>
       <ConfigProvider>
         <AntdApp>
+          <UpdateBanner />
           <ErrorBoundary>
             <Refine
               dataProvider={dataProvider(supabaseClient)}
