@@ -49,6 +49,9 @@ const EventEdit = lazy(() => import('./pages/events/edit').then((m) => ({ defaul
 const SprocketImport = lazy(() =>
   import('./pages/sprocket-import').then((m) => ({ default: m.SprocketImport })),
 )
+const Reconciliation = lazy(() =>
+  import('./pages/reconciliation').then((m) => ({ default: m.Reconciliation })),
+)
 
 const LogSession = lazy(() =>
   import('./pages/coach/log-session').then((m) => ({ default: m.LogSession })),
@@ -117,6 +120,7 @@ const AdminRoutes = () => (
         <Route path="edit/:id" element={<EventEdit />} />
       </Route>
       <Route path="/sprocket-import" element={<SprocketImport />} />
+      <Route path="/reconciliation" element={<Reconciliation />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
   </ThemedLayout>
@@ -246,6 +250,11 @@ function App() {
                   name: 'sprocket-import',
                   list: '/sprocket-import',
                   meta: { label: 'Import Calendar' },
+                },
+                {
+                  name: 'reconciliation',
+                  list: '/reconciliation',
+                  meta: { label: 'Reconciliation' },
                 },
               ]}
               options={{
