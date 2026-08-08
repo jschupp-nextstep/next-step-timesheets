@@ -26,6 +26,16 @@ const FIXED_HOURS_FULL = new Set(['Camp-Full Day', 'Nurse-Full Day'])
 
 const OTHER = '__other__'
 
+// 1v1 / Private Training pay is a flat fee looked up by coach (not
+// calculated from these hours) -- but the session length still needs
+// tracking, both for the coach's own record and because a future payroll
+// pass may end up keying the flat fee off which length was worked.
+const DIRECT_FLAT_DURATIONS = [
+  { label: '60 minutes', value: 60 },
+  { label: '90 minutes', value: 90 },
+  { label: '120 minutes', value: 120 },
+]
+
 function timeSpanHours(start: string | null, end: string | null): number | null {
   if (!start || !end) return null
   const startTime = dayjs(`2000-01-01T${start}`)
@@ -55,6 +65,7 @@ export const LogSession = () => {
   const [otherEnd, setOtherEnd] = useState<Dayjs | null>(null)
   const [directStart, setDirectStart] = useState<Dayjs | null>(null)
   const [directEnd, setDirectEnd] = useState<Dayjs | null>(null)
+  const [directFlatMinutes, setDirectFlatMinutes] = useState<number | null>(null)
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -125,6 +136,7 @@ export const LogSession = () => {
     directStart?.format('HH:mm:ss') ?? null,
     directEnd?.format('HH:mm:ss') ?? null,
   )
+  const directFlatHours = directFlatMinutes != null ? directFlatMinutes / 60 : null
 
   const resetForm = () => {
     setProgramId(null)
@@ -135,12 +147,13 @@ export const LogSession = () => {
     setOtherEnd(null)
     setDirectStart(null)
     setDirectEnd(null)
+    setDirectFlatMinutes(null)
     setNotes('')
   }
 
   const canSubmit = (() => {
     if (!coachId || !programId) return false
-    if (isDirectFlat) return !!notes.trim()
+    if (isDirectFlat) return !!notes.trim() && directFlatMinutes != null
     if (isDirectTime) return !!directStart && !!directEnd && directHours != null
     if (isSessionMode) {
       if (locationId === OTHER) return !!otherSessionName.trim() && !!otherStart && !!otherEnd && otherHours != null
@@ -159,7 +172,8 @@ export const LogSession = () => {
           coach_id: coachId,
           program_id: programId,
           entry_date: entryDate.format('YYYY-MM-DD'),
-          session_name: null,
+          hours: directFlatHours,
+          session_name: directFlatMinutes != null ? `${directFlatMinutes} minute session` : null,
           notes: notes || null,
           status: 'pending',
         }
@@ -355,6 +369,24 @@ export const LogSession = () => {
               {directStart && directEnd && (
                 <Form.Item label="Hours">
                   <Input readOnly value={directHours != null ? `${directHours.toFixed(2)} hrs` : 'Invalid range'} />
+                </Form.Item>
+              )}
+            </>
+          )}
+
+          {isDirectFlat && (
+            <>
+              <Form.Item label="Session length" required>
+                <Select
+                  placeholder="Select session length"
+                  value={directFlatMinutes ?? undefined}
+                  options={DIRECT_FLAT_DURATIONS}
+                  onChange={(value) => setDirectFlatMinutes(value)}
+                />
+              </Form.Item>
+              {directFlatMinutes != null && (
+                <Form.Item label="Hours">
+                  <Input readOnly value={`${directFlatHours!.toFixed(2)} hrs`} />
                 </Form.Item>
               )}
             </>
