@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useGetIdentity, useList } from '@refinedev/core'
-import { Alert, Button, Card, DatePicker, Form, Input, Select, Space, TimePicker, Typography, message } from 'antd'
+import { Alert, App, Button, Card, DatePicker, Form, Input, Select, Space, TimePicker, Typography } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 
 import { supabaseClient } from '../../utility/supabaseClient'
@@ -42,6 +42,7 @@ function resolveEventHours(programName: string, event: EventRow, location: Locat
 }
 
 export const LogSession = () => {
+  const { message } = App.useApp()
   const { data: identity } = useGetIdentity<Identity>()
   const coachId = identity?.role === 'coach' ? identity.coachId : undefined
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { Alert, Button, Card, Select, Space, Table, Typography, Upload, message } from 'antd'
+import { Alert, App, Button, Card, Select, Space, Table, Typography, Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
 
 import { supabaseClient } from '../../utility/supabaseClient'
@@ -109,6 +109,7 @@ type ImportSummary = {
 }
 
 export const SprocketImport = () => {
+  const { message } = App.useApp()
   const [parsed, setParsed] = useState<ParsedEvent[] | null>(null)
   const [parseErrors, setParseErrors] = useState<string[]>([])
   const [programMap, setProgramMap] = useState<Record<string, string | null>>({})

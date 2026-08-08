@@ -142,14 +142,26 @@ const useNeedsPassword = () => {
   return needsPassword
 }
 
+// Plain component state for "skipped" doesn't survive a page reload -- and
+// since the underlying session's amr doesn't change just because someone
+// skipped, a refresh would bring the prompt right back every time. Back it
+// with sessionStorage instead, so skipping actually sticks until either
+// they set a password (a real password-based login) or close the tab.
+const SKIP_PASSWORD_PROMPT_KEY = 'skip-password-prompt'
+
 const AuthenticatedShell = () => {
   const { data: identity, isLoading } = useGetIdentity<Identity>()
   const needsPassword = useNeedsPassword()
-  const [skipped, setSkipped] = useState(false)
+  const [skipped, setSkipped] = useState(() => sessionStorage.getItem(SKIP_PASSWORD_PROMPT_KEY) === 'true')
+
+  const dismissPasswordPrompt = () => {
+    sessionStorage.setItem(SKIP_PASSWORD_PROMPT_KEY, 'true')
+    setSkipped(true)
+  }
 
   if (isLoading || needsPassword === null) return <PageLoading />
   if (needsPassword && !skipped) {
-    return <UpdatePassword onSkip={() => setSkipped(true)} onSuccess={() => setSkipped(true)} />
+    return <UpdatePassword onSkip={dismissPasswordPrompt} onSuccess={dismissPasswordPrompt} />
   }
 
   return identity?.role === 'coach' ? <CoachRoutes /> : <AdminRoutes />
