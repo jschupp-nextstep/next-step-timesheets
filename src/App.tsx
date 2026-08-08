@@ -52,6 +52,9 @@ const SprocketImport = lazy(() =>
 const Reconciliation = lazy(() =>
   import('./pages/reconciliation').then((m) => ({ default: m.Reconciliation })),
 )
+const PaymentDue = lazy(() =>
+  import('./pages/payment-due').then((m) => ({ default: m.PaymentDue })),
+)
 
 const LogSession = lazy(() =>
   import('./pages/coach/log-session').then((m) => ({ default: m.LogSession })),
@@ -121,6 +124,7 @@ const AdminRoutes = () => (
       </Route>
       <Route path="/sprocket-import" element={<SprocketImport />} />
       <Route path="/reconciliation" element={<Reconciliation />} />
+      <Route path="/payment-due" element={<PaymentDue />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
   </ThemedLayout>
@@ -255,6 +259,11 @@ function App() {
                   name: 'reconciliation',
                   list: '/reconciliation',
                   meta: { label: 'Reconciliation' },
+                },
+                {
+                  name: 'payment-due',
+                  list: '/payment-due',
+                  meta: { label: 'Payment Due' },
                 },
               ]}
               options={{
