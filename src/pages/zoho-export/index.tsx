@@ -13,6 +13,7 @@ type EntryRow = {
   entry_date: string
   hours: number | null
   flat_amount: number | null
+  notes: string | null
   status: 'pending' | 'paid'
   coaches: { name: string; pay_type: '1099' | 'w2' } | null
   programs: { name: string; entry_mode: string } | null
@@ -23,7 +24,9 @@ type ProgramRow = { id: string; name: string }
 // a mismatch (including em dash vs hyphen, spacing, pluralization) either
 // silently creates a new account in Zoho or fails the row, rather than
 // erroring loudly. Kept as a static lookup rather than derived, so a
-// renamed account in Zoho can't silently break the export.
+// renamed account in Zoho can't silently break the export. Reimbursements
+// deliberately have no debit account here -- they're infrequent enough
+// that categorizing them by hand in Zoho is preferable to guessing.
 const ZOHO_ACCOUNTS = {
   coachLabor1099: 'Coach Labor — 1099 Contractors',
   payrollLiabilities: 'Payroll Liabilities',
@@ -125,8 +128,20 @@ export const ZohoExport = () => {
   )
 
   const entries1099 = useMemo(
-    () => (result?.data ?? []).filter((e) => e.coaches?.pay_type === '1099'),
+    () =>
+      (result?.data ?? []).filter(
+        (e) => e.coaches?.pay_type === '1099' && e.programs?.entry_mode !== 'reimbursement',
+      ),
     [result?.data],
+  )
+
+  const reimbursementEntries = useMemo(
+    () => (result?.data ?? []).filter((e) => e.programs?.entry_mode === 'reimbursement'),
+    [result?.data],
+  )
+  const reimbursementTotal = useMemo(
+    () => reimbursementEntries.reduce((sum, e) => sum + (e.flat_amount ?? 0), 0),
+    [reimbursementEntries],
   )
 
   const computed = useMemo(
@@ -158,7 +173,12 @@ export const ZohoExport = () => {
     return Array.from(map.values()).sort((a, b) => a.coachName.localeCompare(b.coachName))
   }, [computed])
 
-  const suffix = range[0].format('YYYYMM')
+  // Both journal entries below can be generated for the same date range, so
+  // each needs its own suffix -- 01 for coach labor, 02 for reimbursements
+  // -- to avoid two entries landing on the same JE-PAY-<suffix> number.
+  const monthCode = range[0].format('YYYYMM')
+  const suffix = `${monthCode}01`
+  const reimbursementSuffix = `${monthCode}02`
   const rangeLabel = `${range[0].format('MMM D, YYYY')} – ${range[1].format('MMM D, YYYY')}`
 
   const generate = () => {
@@ -196,6 +216,43 @@ export const ZohoExport = () => {
     const now = dayjs().format('YYYY-MM-DD_HHmmss')
     downloadCsv(`zoho-1099-journal-${suffix}-${now}.csv`, toCsv(rows))
     message.success('CSV downloaded')
+  }
+
+  const generateReimbursement = () => {
+    if (reimbursementEntries.length === 0) {
+      message.warning('No reimbursements in this range.')
+      return
+    }
+    const journalDate = range[1].format('YYYY-MM-DD')
+    const shared = {
+      'Journal Date': journalDate,
+      'Reference Number': `Reimbursements — ${range[0].format('MMM YYYY')}`,
+      'Journal Number Prefix': 'JE-PAY-',
+      'Journal Number Suffix': reimbursementSuffix,
+      Notes: `Coach/staff reimbursements for ${rangeLabel}, generated from Next Step Timesheets. Debit account intentionally left blank -- assign in Zoho.`,
+      'Journal Type': 'both',
+      Currency: 'USD',
+      Status: 'published',
+    }
+    const rows: ZohoRow[] = [
+      {
+        ...shared,
+        Account: '',
+        Description: `Reimbursements — ${rangeLabel}`,
+        Debit: reimbursementTotal.toFixed(2),
+        Credit: '',
+      },
+      {
+        ...shared,
+        Account: ZOHO_ACCOUNTS.payrollLiabilities,
+        Description: `Reimbursement clearing — ${rangeLabel}`,
+        Debit: '',
+        Credit: reimbursementTotal.toFixed(2),
+      },
+    ]
+    const now = dayjs().format('YYYY-MM-DD_HHmmss')
+    downloadCsv(`zoho-reimbursements-${reimbursementSuffix}-${now}.csv`, toCsv(rows))
+    message.success('CSV downloaded -- remember to assign the debit account in Zoho before publishing.')
   }
 
   return (
@@ -294,6 +351,46 @@ export const ZohoExport = () => {
           status itself.
         </Typography.Paragraph>
       </Card>
+
+      {reimbursementEntries.length > 0 && (
+        <Card title="Reimbursements" size="small" style={{ marginTop: 16 }} loading={query.isLoading}>
+          <Typography.Paragraph type="secondary">
+            Not coach labor -- routed to its own journal entry with the debit account left blank
+            for you to assign in Zoho, since these are infrequent and vary in category.
+          </Typography.Paragraph>
+          <Table
+            dataSource={reimbursementEntries}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            summary={() => (
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0}>
+                  <strong>Total</strong>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={1} />
+                <Table.Summary.Cell index={2} align="right">
+                  <strong>${reimbursementTotal.toFixed(2)}</strong>
+                </Table.Summary.Cell>
+              </Table.Summary.Row>
+            )}
+          >
+            <Table.Column dataIndex="entry_date" title="Date" width={110} />
+            <Table.Column title="Coach" render={(_, row: EntryRow) => row.coaches?.name ?? '—'} />
+            <Table.Column title="What for" render={(_, row: EntryRow) => row.notes || '—'} />
+            <Table.Column
+              title="Amount"
+              width={110}
+              align="right"
+              render={(_, row: EntryRow) => `$${(row.flat_amount ?? 0).toFixed(2)}`}
+            />
+          </Table>
+
+          <Space style={{ marginTop: 16 }}>
+            <Button onClick={generateReimbursement}>Download Reimbursement CSV</Button>
+          </Space>
+        </Card>
+      )}
     </div>
   )
 }

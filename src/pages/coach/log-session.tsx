@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useGetIdentity, useList } from '@refinedev/core'
-import { Alert, App, Button, Card, DatePicker, Form, Input, Select, Space, TimePicker, Typography } from 'antd'
+import { Alert, App, Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, TimePicker, Typography } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 
 import { supabaseClient } from '../../utility/supabaseClient'
@@ -66,6 +66,7 @@ export const LogSession = () => {
   const [directStart, setDirectStart] = useState<Dayjs | null>(null)
   const [directEnd, setDirectEnd] = useState<Dayjs | null>(null)
   const [directFlatMinutes, setDirectFlatMinutes] = useState<number | null>(null)
+  const [reimbursementAmount, setReimbursementAmount] = useState<number | null>(null)
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -73,7 +74,7 @@ export const LogSession = () => {
     resource: 'programs',
     filters: [
       { field: 'is_active', operator: 'eq', value: true },
-      { field: 'entry_mode', operator: 'in', value: ['session', 'direct_time', 'direct_flat'] },
+      { field: 'entry_mode', operator: 'in', value: ['session', 'direct_time', 'direct_flat', 'reimbursement'] },
     ],
     sorters: [{ field: 'name', order: 'asc' }],
     pagination: { pageSize: 100 },
@@ -92,6 +93,7 @@ export const LogSession = () => {
   const isSessionMode = selectedProgram?.entry_mode === 'session'
   const isDirectTime = selectedProgram?.entry_mode === 'direct_time'
   const isDirectFlat = selectedProgram?.entry_mode === 'direct_flat'
+  const isReimbursement = selectedProgram?.entry_mode === 'reimbursement'
 
   const { result: eventsResult } = useList<EventRow>({
     resource: 'events',
@@ -148,11 +150,13 @@ export const LogSession = () => {
     setDirectStart(null)
     setDirectEnd(null)
     setDirectFlatMinutes(null)
+    setReimbursementAmount(null)
     setNotes('')
   }
 
   const canSubmit = (() => {
     if (!coachId || !programId) return false
+    if (isReimbursement) return !!notes.trim() && reimbursementAmount != null && reimbursementAmount > 0
     if (isDirectFlat) return !!notes.trim() && directFlatMinutes != null
     if (isDirectTime) return !!directStart && !!directEnd && directHours != null
     if (isSessionMode) {
@@ -167,7 +171,17 @@ export const LogSession = () => {
     setSubmitting(true)
     try {
       let payload: Record<string, unknown>
-      if (isDirectFlat) {
+      if (isReimbursement) {
+        payload = {
+          coach_id: coachId,
+          program_id: programId,
+          entry_date: entryDate.format('YYYY-MM-DD'),
+          flat_amount: reimbursementAmount,
+          session_name: selectedProgram.name,
+          notes: notes || null,
+          status: 'pending',
+        }
+      } else if (isDirectFlat) {
         payload = {
           coach_id: coachId,
           program_id: programId,
@@ -392,11 +406,30 @@ export const LogSession = () => {
             </>
           )}
 
+          {isReimbursement && (
+            <Form.Item label="Amount" required>
+              <InputNumber
+                min={0.01}
+                step={0.01}
+                style={{ width: '100%' }}
+                addonBefore="$"
+                value={reimbursementAmount ?? undefined}
+                onChange={(value) => setReimbursementAmount(value)}
+              />
+            </Form.Item>
+          )}
+
           {programId && (
-            <Form.Item label="Notes" required={isDirectFlat}>
+            <Form.Item label="Notes" required={isDirectFlat || isReimbursement}>
               <Input.TextArea
                 rows={3}
-                placeholder={isDirectFlat ? 'Who was this session for?' : 'Optional'}
+                placeholder={
+                  isReimbursement
+                    ? 'What did you buy? (e.g. "Ice for camp, 3 bags")'
+                    : isDirectFlat
+                      ? 'Who was this session for?'
+                      : 'Optional'
+                }
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
