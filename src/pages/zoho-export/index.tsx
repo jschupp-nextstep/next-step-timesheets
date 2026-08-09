@@ -182,77 +182,78 @@ export const ZohoExport = () => {
   const rangeLabel = `${range[0].format('MMM D, YYYY')} – ${range[1].format('MMM D, YYYY')}`
 
   const generate = () => {
-    if (included.length === 0) {
-      message.warning('Nothing to export -- no eligible 1099 entries in this range.')
+    if (included.length === 0 && reimbursementEntries.length === 0) {
+      message.warning('Nothing to export -- no eligible entries in this range.')
       return
     }
     const journalDate = range[1].format('YYYY-MM-DD')
-    const shared = {
-      'Journal Date': journalDate,
-      'Reference Number': `1099 Coach Pay — ${range[0].format('MMM YYYY')}`,
-      'Journal Number Prefix': 'JE-PAY-',
-      'Journal Number Suffix': suffix,
-      Notes: `Aggregate 1099 coach labor for ${rangeLabel}, generated from Next Step Timesheets.`,
-      'Journal Type': 'both',
-      Currency: 'USD',
-      Status: 'published',
-    }
-    const rows: ZohoRow[] = [
-      {
-        ...shared,
-        Account: ZOHO_ACCOUNTS.coachLabor1099,
-        Description: `1099 coach labor — ${rangeLabel}`,
-        Debit: total.toFixed(2),
-        Credit: '',
-      },
-      {
-        ...shared,
-        Account: ZOHO_ACCOUNTS.payrollLiabilities,
-        Description: `Coach pay clearing — ${rangeLabel}`,
-        Debit: '',
-        Credit: total.toFixed(2),
-      },
-    ]
-    const now = dayjs().format('YYYY-MM-DD_HHmmss')
-    downloadCsv(`zoho-1099-journal-${suffix}-${now}.csv`, toCsv(rows))
-    message.success('CSV downloaded')
-  }
+    const rows: ZohoRow[] = []
 
-  const generateReimbursement = () => {
-    if (reimbursementEntries.length === 0) {
-      message.warning('No reimbursements in this range.')
-      return
+    if (included.length > 0) {
+      const shared = {
+        'Journal Date': journalDate,
+        'Reference Number': `1099 Coach Pay — ${range[0].format('MMM YYYY')}`,
+        'Journal Number Prefix': 'JE-PAY-',
+        'Journal Number Suffix': suffix,
+        Notes: `Aggregate 1099 coach labor for ${rangeLabel}, generated from Next Step Timesheets.`,
+        'Journal Type': 'both',
+        Currency: 'USD',
+        Status: 'published',
+      }
+      rows.push(
+        {
+          ...shared,
+          Account: ZOHO_ACCOUNTS.coachLabor1099,
+          Description: `1099 coach labor — ${rangeLabel}`,
+          Debit: total.toFixed(2),
+          Credit: '',
+        },
+        {
+          ...shared,
+          Account: ZOHO_ACCOUNTS.payrollLiabilities,
+          Description: `Coach pay clearing — ${rangeLabel}`,
+          Debit: '',
+          Credit: total.toFixed(2),
+        },
+      )
     }
-    const journalDate = range[1].format('YYYY-MM-DD')
-    const shared = {
-      'Journal Date': journalDate,
-      'Reference Number': `Reimbursements — ${range[0].format('MMM YYYY')}`,
-      'Journal Number Prefix': 'JE-PAY-',
-      'Journal Number Suffix': reimbursementSuffix,
-      Notes: `Coach/staff reimbursements for ${rangeLabel}, generated from Next Step Timesheets. Debit account intentionally left blank -- assign in Zoho.`,
-      'Journal Type': 'both',
-      Currency: 'USD',
-      Status: 'published',
+
+    if (reimbursementEntries.length > 0) {
+      const shared = {
+        'Journal Date': journalDate,
+        'Reference Number': `Reimbursements — ${range[0].format('MMM YYYY')}`,
+        'Journal Number Prefix': 'JE-PAY-',
+        'Journal Number Suffix': reimbursementSuffix,
+        Notes: `Coach/staff reimbursements for ${rangeLabel}, generated from Next Step Timesheets. Debit account intentionally left blank -- Zoho's import will flag these rows to assign by hand.`,
+        'Journal Type': 'both',
+        Currency: 'USD',
+        Status: 'published',
+      }
+      rows.push(
+        {
+          ...shared,
+          Account: '',
+          Description: `Reimbursements — ${rangeLabel}`,
+          Debit: reimbursementTotal.toFixed(2),
+          Credit: '',
+        },
+        {
+          ...shared,
+          Account: ZOHO_ACCOUNTS.payrollLiabilities,
+          Description: `Reimbursement clearing — ${rangeLabel}`,
+          Debit: '',
+          Credit: reimbursementTotal.toFixed(2),
+        },
+      )
     }
-    const rows: ZohoRow[] = [
-      {
-        ...shared,
-        Account: '',
-        Description: `Reimbursements — ${rangeLabel}`,
-        Debit: reimbursementTotal.toFixed(2),
-        Credit: '',
-      },
-      {
-        ...shared,
-        Account: ZOHO_ACCOUNTS.payrollLiabilities,
-        Description: `Reimbursement clearing — ${rangeLabel}`,
-        Debit: '',
-        Credit: reimbursementTotal.toFixed(2),
-      },
-    ]
+
     const now = dayjs().format('YYYY-MM-DD_HHmmss')
-    downloadCsv(`zoho-reimbursements-${reimbursementSuffix}-${now}.csv`, toCsv(rows))
-    message.success('CSV downloaded -- remember to assign the debit account in Zoho before publishing.')
+    downloadCsv(`zoho-journal-${monthCode}-${now}.csv`, toCsv(rows))
+    message.success(
+      reimbursementEntries.length > 0
+        ? 'CSV downloaded -- Zoho will flag the reimbursement rows for you to assign an account.'
+        : 'CSV downloaded',
+    )
   }
 
   return (
@@ -341,7 +342,11 @@ export const ZohoExport = () => {
         </Table>
 
         <Space style={{ marginTop: 16 }}>
-          <Button type="primary" disabled={included.length === 0} onClick={generate}>
+          <Button
+            type="primary"
+            disabled={included.length === 0 && reimbursementEntries.length === 0}
+            onClick={generate}
+          >
             Download Zoho CSV
           </Button>
         </Space>
@@ -355,8 +360,9 @@ export const ZohoExport = () => {
       {reimbursementEntries.length > 0 && (
         <Card title="Reimbursements" size="small" style={{ marginTop: 16 }} loading={query.isLoading}>
           <Typography.Paragraph type="secondary">
-            Not coach labor -- routed to its own journal entry with the debit account left blank
-            for you to assign in Zoho, since these are infrequent and vary in category.
+            Not coach labor -- included in the same CSV above as a separate journal entry with the
+            debit account left blank. Zoho's import will flag those rows so you can assign an
+            account to each by hand.
           </Typography.Paragraph>
           <Table
             dataSource={reimbursementEntries}
@@ -385,10 +391,6 @@ export const ZohoExport = () => {
               render={(_, row: EntryRow) => `$${(row.flat_amount ?? 0).toFixed(2)}`}
             />
           </Table>
-
-          <Space style={{ marginTop: 16 }}>
-            <Button onClick={generateReimbursement}>Download Reimbursement CSV</Button>
-          </Space>
         </Card>
       )}
     </div>

@@ -5,6 +5,8 @@ import dayjs, { type Dayjs } from 'dayjs'
 type EntryFormValues = {
   coach_id: string
   program_id: string
+  event_id: string | null
+  location_id: string | null
   entry_date: Dayjs
   start_time: Dayjs | null
   end_time: Dayjs | null
@@ -38,6 +40,16 @@ export const EntryEdit = () => {
     optionLabel: 'name',
     optionValue: 'id',
   })
+  const { selectProps: locationSelectProps } = useSelect({
+    resource: 'locations',
+    optionLabel: 'name',
+    optionValue: 'id',
+  })
+  const { selectProps: eventSelectProps } = useSelect({
+    resource: 'events',
+    optionLabel: 'session_name',
+    optionValue: 'id',
+  })
 
   return (
     <Edit saveButtonProps={saveButtonProps}>
@@ -60,6 +72,12 @@ export const EntryEdit = () => {
         </Form.Item>
         <Form.Item label="Program" name="program_id" rules={[{ required: true }]}>
           <Select {...programSelectProps} />
+        </Form.Item>
+        <Form.Item label="Linked event (optional)" name="event_id" extra="Only used for session-mode entries. Leave blank for Office Hours, 1v1, reimbursements, etc.">
+          <Select {...eventSelectProps} allowClear />
+        </Form.Item>
+        <Form.Item label="Location (optional)" name="location_id">
+          <Select {...locationSelectProps} allowClear />
         </Form.Item>
         <Form.Item label="Date" name="entry_date" rules={[{ required: true }]}>
           <DatePicker style={{ width: '100%' }} />

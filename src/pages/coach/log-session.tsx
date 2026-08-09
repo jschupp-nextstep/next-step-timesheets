@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
-import { useGetIdentity, useList } from '@refinedev/core'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useGetIdentity, useList, useOne } from '@refinedev/core'
 import { Alert, App, Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, TimePicker, Typography } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
+import { useNavigate, useParams } from 'react-router'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
@@ -16,6 +17,20 @@ type EventRow = {
   start_time: string | null
   end_time: string | null
   session_name: string | null
+}
+type TimesheetEntryDetail = {
+  id: string
+  program_id: string
+  event_id: string | null
+  location_id: string | null
+  entry_date: string
+  start_time: string | null
+  end_time: string | null
+  hours: number | null
+  flat_amount: number | null
+  session_name: string | null
+  notes: string | null
+  status: 'pending' | 'paid'
 }
 
 // Camp/Nurse programs pay a fixed number of hours looked up from the
@@ -55,6 +70,17 @@ export const LogSession = () => {
   const { message } = App.useApp()
   const { data: identity } = useGetIdentity<Identity>()
   const coachId = identity?.role === 'coach' ? identity.coachId : undefined
+  const navigate = useNavigate()
+  const { id: editId } = useParams()
+  const isEditMode = !!editId
+
+  const { result: editEntryResult, query: editEntryQuery } = useOne<TimesheetEntryDetail>({
+    resource: 'timesheet_entries',
+    id: editId,
+    queryOptions: { enabled: isEditMode },
+  })
+  const editEntry = editEntryResult
+  const populatedRef = useRef(false)
 
   const [entryDate, setEntryDate] = useState<Dayjs>(dayjs())
   const [programId, setProgramId] = useState<string | null>(null)
@@ -88,6 +114,36 @@ export const LogSession = () => {
   const programs = programsResult?.data ?? []
   const locations = locationsResult?.data ?? []
   const locationsById = useMemo(() => new Map(locations.map((l) => [l.id, l])), [locations])
+
+  useEffect(() => {
+    if (!isEditMode || populatedRef.current || !editEntry || programs.length === 0) return
+    populatedRef.current = true
+
+    const program = programs.find((p) => p.id === editEntry.program_id)
+    setEntryDate(dayjs(editEntry.entry_date))
+    setProgramId(editEntry.program_id)
+    setNotes(editEntry.notes ?? '')
+
+    if (program?.entry_mode === 'reimbursement') {
+      setReimbursementAmount(editEntry.flat_amount)
+    } else if (program?.entry_mode === 'direct_flat') {
+      const minutes = editEntry.hours != null ? Math.round(editEntry.hours * 60) : null
+      setDirectFlatMinutes(minutes)
+    } else if (program?.entry_mode === 'direct_time') {
+      setDirectStart(editEntry.start_time ? dayjs(`2000-01-01T${editEntry.start_time}`) : null)
+      setDirectEnd(editEntry.end_time ? dayjs(`2000-01-01T${editEntry.end_time}`) : null)
+    } else if (program?.entry_mode === 'session') {
+      if (editEntry.event_id) {
+        setLocationId(editEntry.location_id)
+        setEventId(editEntry.event_id)
+      } else {
+        setLocationId(OTHER)
+        setOtherSessionName(editEntry.session_name ?? '')
+        setOtherStart(editEntry.start_time ? dayjs(`2000-01-01T${editEntry.start_time}`) : null)
+        setOtherEnd(editEntry.end_time ? dayjs(`2000-01-01T${editEntry.end_time}`) : null)
+      }
+    }
+  }, [isEditMode, editEntry, programs])
 
   const selectedProgram = programs.find((p) => p.id === programId)
   const isSessionMode = selectedProgram?.entry_mode === 'session'
@@ -175,7 +231,12 @@ export const LogSession = () => {
         payload = {
           coach_id: coachId,
           program_id: programId,
+          event_id: null,
+          location_id: null,
           entry_date: entryDate.format('YYYY-MM-DD'),
+          start_time: null,
+          end_time: null,
+          hours: null,
           flat_amount: reimbursementAmount,
           session_name: selectedProgram.name,
           notes: notes || null,
@@ -185,8 +246,13 @@ export const LogSession = () => {
         payload = {
           coach_id: coachId,
           program_id: programId,
+          event_id: null,
+          location_id: null,
           entry_date: entryDate.format('YYYY-MM-DD'),
+          start_time: null,
+          end_time: null,
           hours: directFlatHours,
+          flat_amount: null,
           session_name: directFlatMinutes != null ? `${directFlatMinutes} minute session` : null,
           notes: notes || null,
           status: 'pending',
@@ -195,10 +261,13 @@ export const LogSession = () => {
         payload = {
           coach_id: coachId,
           program_id: programId,
+          event_id: null,
+          location_id: null,
           entry_date: entryDate.format('YYYY-MM-DD'),
           start_time: directStart?.format('HH:mm:ss'),
           end_time: directEnd?.format('HH:mm:ss'),
           hours: directHours,
+          flat_amount: null,
           session_name: selectedProgram.name,
           notes: notes || null,
           status: 'pending',
@@ -213,6 +282,7 @@ export const LogSession = () => {
           start_time: otherStart?.format('HH:mm:ss'),
           end_time: otherEnd?.format('HH:mm:ss'),
           hours: otherHours,
+          flat_amount: null,
           session_name: otherSessionName.trim(),
           notes: notes || null,
           status: 'pending',
@@ -227,27 +297,56 @@ export const LogSession = () => {
           start_time: selectedEvent?.start_time ?? null,
           end_time: selectedEvent?.end_time ?? null,
           hours: resolvedHours,
+          flat_amount: null,
           session_name: selectedEvent?.session_name ?? null,
           notes: notes || null,
           status: 'pending',
         }
       }
 
-      const { error } = await supabaseClient.from('timesheet_entries').insert(payload)
+      const { error } = isEditMode
+        ? await supabaseClient.from('timesheet_entries').update(payload).eq('id', editId)
+        : await supabaseClient.from('timesheet_entries').insert(payload)
       if (error) {
         message.error(`Couldn't save: ${error.message}`)
         return
       }
-      message.success('Session logged')
-      resetForm()
+      message.success(isEditMode ? 'Entry updated' : 'Session logged')
+      if (isEditMode) {
+        navigate('/my-sessions')
+      } else {
+        resetForm()
+      }
     } finally {
       setSubmitting(false)
     }
   }
 
+  if (isEditMode && editEntryQuery.isLoading) {
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>Edit Entry</Typography.Title>
+        <Card loading />
+      </div>
+    )
+  }
+
+  if (isEditMode && editEntry?.status === 'paid') {
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>Edit Entry</Typography.Title>
+        <Alert
+          type="warning"
+          showIcon
+          message="This entry has already been paid and can no longer be edited."
+        />
+      </div>
+    )
+  }
+
   return (
     <div style={{ maxWidth: 560 }}>
-      <Typography.Title level={3}>Log a Session</Typography.Title>
+      <Typography.Title level={3}>{isEditMode ? 'Edit Entry' : 'Log a Session'}</Typography.Title>
 
       <Card>
         <Form layout="vertical">
@@ -438,8 +537,9 @@ export const LogSession = () => {
 
           <Space>
             <Button type="primary" disabled={!canSubmit} loading={submitting} onClick={handleSubmit}>
-              Submit
+              {isEditMode ? 'Save changes' : 'Submit'}
             </Button>
+            {isEditMode && <Button onClick={() => navigate('/my-sessions')}>Cancel</Button>}
           </Space>
         </Form>
       </Card>

@@ -145,6 +145,7 @@ const CoachRoutes = () => (
     <Routes>
       <Route index element={<Navigate to="/log-session" replace />} />
       <Route path="/log-session" element={<LogSession />} />
+      <Route path="/log-session/edit/:id" element={<LogSession />} />
       <Route path="/my-sessions" element={<MySessions />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
