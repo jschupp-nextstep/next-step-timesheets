@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
 import { Alert, App, Button, Card, DatePicker, Space, Table, Typography } from 'antd'
+import { Link } from 'react-router'
 import dayjs, { type Dayjs } from 'dayjs'
 
 import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
@@ -233,6 +234,22 @@ export const ZohoExport = () => {
               <Table.Column dataIndex={['entry', 'entry_date']} title="Date" width={110} />
               <Table.Column title="Coach" render={(_, row: (typeof flagged)[number]) => row.entry.coaches?.name ?? '—'} />
               <Table.Column title="Program" render={(_, row: (typeof flagged)[number]) => row.entry.programs?.name ?? '—'} />
+              <Table.Column
+                title="Fix"
+                render={(_, row: (typeof flagged)[number]) => {
+                  const isFlat = row.entry.programs?.entry_mode === 'direct_flat'
+                  // Opens in a new tab deliberately -- fixing a rate shouldn't
+                  // lose the export's current date range/preview state.
+                  const to = isFlat
+                    ? `/one-v-one-rates/create?coach_id=${row.entry.coach_id}`
+                    : `/rates/create?coach_id=${row.entry.coach_id}&program_id=${row.entry.program_id}`
+                  return (
+                    <Link to={to} target="_blank" rel="noopener noreferrer">
+                      Add rate
+                    </Link>
+                  )
+                }}
+              />
             </Table>
           }
         />

@@ -1,5 +1,6 @@
 import { Create, useForm, useSelect } from '@refinedev/antd'
 import { Form, InputNumber, Select } from 'antd'
+import { useSearchParams } from 'react-router'
 
 export const OneVOneRateCreate = () => {
   const { formProps, saveButtonProps } = useForm({ resource: 'one_v_one_rates' })
@@ -10,10 +11,15 @@ export const OneVOneRateCreate = () => {
     optionValue: 'id',
   })
   const oversightCoachId = Form.useWatch('oversight_coach_id', formProps.form)
+  const [searchParams] = useSearchParams()
 
   return (
     <Create saveButtonProps={saveButtonProps}>
-      <Form {...formProps} layout="vertical">
+      <Form
+        {...formProps}
+        layout="vertical"
+        initialValues={{ coach_id: searchParams.get('coach_id') || undefined }}
+      >
         <Form.Item label="Coach" name="coach_id" rules={[{ required: true }]}>
           <Select {...coachSelectProps} />
         </Form.Item>
