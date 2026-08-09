@@ -55,6 +55,9 @@ const Reconciliation = lazy(() =>
 const PaymentDue = lazy(() =>
   import('./pages/payment-due').then((m) => ({ default: m.PaymentDue })),
 )
+const ZohoExport = lazy(() =>
+  import('./pages/zoho-export').then((m) => ({ default: m.ZohoExport })),
+)
 
 const LogSession = lazy(() =>
   import('./pages/coach/log-session').then((m) => ({ default: m.LogSession })),
@@ -125,6 +128,7 @@ const AdminRoutes = () => (
       <Route path="/sprocket-import" element={<SprocketImport />} />
       <Route path="/reconciliation" element={<Reconciliation />} />
       <Route path="/payment-due" element={<PaymentDue />} />
+      <Route path="/zoho-export" element={<ZohoExport />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
   </ThemedLayout>
@@ -264,6 +268,11 @@ function App() {
                   name: 'payment-due',
                   list: '/payment-due',
                   meta: { label: 'Payment Due' },
+                },
+                {
+                  name: 'zoho-export',
+                  list: '/zoho-export',
+                  meta: { label: 'Zoho Export' },
                 },
               ]}
               options={{

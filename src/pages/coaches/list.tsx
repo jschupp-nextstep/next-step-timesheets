@@ -8,6 +8,7 @@ type Coach = {
   initials: string
   email: string | null
   is_active: boolean
+  pay_type: '1099' | 'w2'
 }
 
 export const CoachList = () => {
@@ -23,6 +24,13 @@ export const CoachList = () => {
         <Table.Column dataIndex="name" title="Name" />
         <Table.Column dataIndex="initials" title="Initials" />
         <Table.Column dataIndex="email" title="Email" render={(v) => v ?? '—'} />
+        <Table.Column
+          dataIndex="pay_type"
+          title="Pay type"
+          render={(value: Coach['pay_type']) => (
+            <Tag color={value === 'w2' ? 'blue' : 'default'}>{value === 'w2' ? 'W-2' : '1099'}</Tag>
+          )}
+        />
         <Table.Column
           dataIndex="is_active"
           title="Status"
