@@ -45,6 +45,8 @@ const OneVOneRateEdit = lazy(() =>
 const EventList = lazy(() => import('./pages/events/list').then((m) => ({ default: m.EventList })))
 const EventCreate = lazy(() => import('./pages/events/create').then((m) => ({ default: m.EventCreate })))
 const EventEdit = lazy(() => import('./pages/events/edit').then((m) => ({ default: m.EventEdit })))
+const EntryList = lazy(() => import('./pages/entries/list').then((m) => ({ default: m.EntryList })))
+const EntryEdit = lazy(() => import('./pages/entries/edit').then((m) => ({ default: m.EntryEdit })))
 
 const SprocketImport = lazy(() =>
   import('./pages/sprocket-import').then((m) => ({ default: m.SprocketImport })),
@@ -124,6 +126,10 @@ const AdminRoutes = () => (
         <Route index element={<EventList />} />
         <Route path="create" element={<EventCreate />} />
         <Route path="edit/:id" element={<EventEdit />} />
+      </Route>
+      <Route path="/entries">
+        <Route index element={<EntryList />} />
+        <Route path="edit/:id" element={<EntryEdit />} />
       </Route>
       <Route path="/sprocket-import" element={<SprocketImport />} />
       <Route path="/reconciliation" element={<Reconciliation />} />
@@ -253,6 +259,12 @@ function App() {
                   create: '/events/create',
                   edit: '/events/edit/:id',
                   meta: { label: 'Events' },
+                },
+                {
+                  name: 'timesheet_entries',
+                  list: '/entries',
+                  edit: '/entries/edit/:id',
+                  meta: { label: 'Timesheet Entries' },
                 },
                 {
                   name: 'sprocket-import',
