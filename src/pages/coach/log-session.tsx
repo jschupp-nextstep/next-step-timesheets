@@ -71,8 +71,9 @@ export const LogSession = () => {
   const { data: identity } = useGetIdentity<Identity>()
   const coachId = identity?.role === 'coach' ? identity.coachId : undefined
   const navigate = useNavigate()
-  const { id: editId } = useParams()
+  const { id: editId, eventId: confirmEventId } = useParams()
   const isEditMode = !!editId
+  const isConfirmMode = !!confirmEventId
 
   const { result: editEntryResult, query: editEntryQuery } = useOne<TimesheetEntryDetail>({
     resource: 'timesheet_entries',
@@ -80,6 +81,11 @@ export const LogSession = () => {
     queryOptions: { enabled: isEditMode },
   })
   const editEntry = editEntryResult
+  const { result: confirmEventResult, query: confirmEventQuery } = useOne<EventRow>({
+    resource: 'events',
+    id: confirmEventId,
+    queryOptions: { enabled: isConfirmMode },
+  })
   const populatedRef = useRef(false)
 
   const [entryDate, setEntryDate] = useState<Dayjs>(dayjs())
@@ -114,6 +120,16 @@ export const LogSession = () => {
   const programs = programsResult?.data ?? []
   const locations = locationsResult?.data ?? []
   const locationsById = useMemo(() => new Map(locations.map((l) => [l.id, l])), [locations])
+
+  useEffect(() => {
+    if (!isConfirmMode || populatedRef.current || !confirmEventResult) return
+    populatedRef.current = true
+
+    setEntryDate(dayjs(confirmEventResult.event_date))
+    setProgramId(confirmEventResult.program_id)
+    setLocationId(confirmEventResult.location_id)
+    setEventId(confirmEventResult.id)
+  }, [isConfirmMode, confirmEventResult])
 
   useEffect(() => {
     if (!isEditMode || populatedRef.current || !editEntry || programs.length === 0) return
@@ -312,7 +328,7 @@ export const LogSession = () => {
         return
       }
       message.success(isEditMode ? 'Entry updated' : 'Session logged')
-      if (isEditMode) {
+      if (isEditMode || isConfirmMode) {
         navigate('/my-sessions')
       } else {
         resetForm()
@@ -326,6 +342,15 @@ export const LogSession = () => {
     return (
       <div style={{ maxWidth: 560 }}>
         <Typography.Title level={3}>Edit Entry</Typography.Title>
+        <Card loading />
+      </div>
+    )
+  }
+
+  if (isConfirmMode && confirmEventQuery.isLoading) {
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>Confirm Hours</Typography.Title>
         <Card loading />
       </div>
     )
@@ -346,7 +371,9 @@ export const LogSession = () => {
 
   return (
     <div style={{ maxWidth: 560 }}>
-      <Typography.Title level={3}>{isEditMode ? 'Edit Entry' : 'Log a Session'}</Typography.Title>
+      <Typography.Title level={3}>
+        {isEditMode ? 'Edit Entry' : isConfirmMode ? 'Confirm Hours' : 'Log a Session'}
+      </Typography.Title>
 
       <Card>
         <Form layout="vertical">
@@ -537,9 +564,11 @@ export const LogSession = () => {
 
           <Space>
             <Button type="primary" disabled={!canSubmit} loading={submitting} onClick={handleSubmit}>
-              {isEditMode ? 'Save changes' : 'Submit'}
+              {isEditMode ? 'Save changes' : isConfirmMode ? 'Confirm' : 'Submit'}
             </Button>
-            {isEditMode && <Button onClick={() => navigate('/my-sessions')}>Cancel</Button>}
+            {(isEditMode || isConfirmMode) && (
+              <Button onClick={() => navigate('/my-sessions')}>Cancel</Button>
+            )}
           </Space>
         </Form>
       </Card>

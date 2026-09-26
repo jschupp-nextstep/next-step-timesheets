@@ -45,6 +45,9 @@ const OneVOneRateEdit = lazy(() =>
 const EventList = lazy(() => import('./pages/events/list').then((m) => ({ default: m.EventList })))
 const EventCreate = lazy(() => import('./pages/events/create').then((m) => ({ default: m.EventCreate })))
 const EventEdit = lazy(() => import('./pages/events/edit').then((m) => ({ default: m.EventEdit })))
+const ScheduleBoard = lazy(() =>
+  import('./pages/schedule-board').then((m) => ({ default: m.ScheduleBoard })),
+)
 const EntryList = lazy(() => import('./pages/entries/list').then((m) => ({ default: m.EntryList })))
 const EntryEdit = lazy(() => import('./pages/entries/edit').then((m) => ({ default: m.EntryEdit })))
 
@@ -127,6 +130,7 @@ const AdminRoutes = () => (
         <Route path="create" element={<EventCreate />} />
         <Route path="edit/:id" element={<EventEdit />} />
       </Route>
+      <Route path="/schedule-board" element={<ScheduleBoard />} />
       <Route path="/entries">
         <Route index element={<EntryList />} />
         <Route path="edit/:id" element={<EntryEdit />} />
@@ -146,6 +150,7 @@ const CoachRoutes = () => (
       <Route index element={<Navigate to="/log-session" replace />} />
       <Route path="/log-session" element={<LogSession />} />
       <Route path="/log-session/edit/:id" element={<LogSession />} />
+      <Route path="/log-session/confirm/:eventId" element={<LogSession />} />
       <Route path="/my-sessions" element={<MySessions />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
@@ -260,6 +265,11 @@ function App() {
                   create: '/events/create',
                   edit: '/events/edit/:id',
                   meta: { label: 'Events' },
+                },
+                {
+                  name: 'schedule-board',
+                  list: '/schedule-board',
+                  meta: { label: 'Schedule Board' },
                 },
                 {
                   name: 'timesheet_entries',

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { useList } from '@refinedev/core'
+import { useGetIdentity, useList } from '@refinedev/core'
 import { App, Button, Card, Segmented, Space, Table, Tag, Typography } from 'antd'
 
 import { supabaseClient } from '../../utility/supabaseClient'
+import type { Identity } from '../../providers/authProvider'
 
 type EventRef = {
   id: string
@@ -38,6 +39,20 @@ type OversightApprovalRow = {
 }
 
 type CoachRow = { id: string; name: string }
+
+type SwapRequestRow = {
+  id: string
+  coach_id: string
+  event_id: string
+  reason: string | null
+  requested_at: string
+  events: {
+    event_date: string
+    session_name: string | null
+    programs: { name: string } | null
+    locations: { name: string } | null
+  } | null
+}
 
 type ReconciliationStatus =
   | 'match'
@@ -81,9 +96,11 @@ function computeStatus(entry: EntryRow): ReconciliationStatus {
 
 export const Reconciliation = () => {
   const { message } = App.useApp()
+  const { data: identity } = useGetIdentity<Identity>()
   const [paymentFilter, setPaymentFilter] = useState<'pending' | 'paid' | 'all'>('pending')
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [decidingId, setDecidingId] = useState<string | null>(null)
+  const [decidingSwapId, setDecidingSwapId] = useState<string | null>(null)
 
   const filters = useMemo(
     () => (paymentFilter === 'all' ? [] : [{ field: 'status', operator: 'eq' as const, value: paymentFilter }]),
@@ -124,6 +141,14 @@ export const Reconciliation = () => {
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { pageSize: 200 },
   })
+  const { result: swapRequestsResult, query: swapRequestsQuery } = useList<SwapRequestRow>({
+    resource: 'swap_requests',
+    meta: { select: '*, events(event_date, session_name, programs(name), locations(name))' },
+    filters: [{ field: 'status', operator: 'eq', value: 'pending' }],
+    sorters: [{ field: 'requested_at', order: 'asc' }],
+    pagination: { pageSize: 200 },
+  })
+  const swapRequests = swapRequestsResult?.data ?? []
 
   const ratesByCoachId = useMemo(
     () => new Map((ratesResult?.data ?? []).map((r) => [r.coach_id, r])),
@@ -200,6 +225,36 @@ export const Reconciliation = () => {
     }
   }
 
+  const decideSwap = async (request: SwapRequestRow, decision: 'approved' | 'denied') => {
+    setDecidingSwapId(request.id)
+    try {
+      if (decision === 'approved') {
+        const { error: deleteError } = await supabaseClient
+          .from('event_assignments')
+          .delete()
+          .eq('event_id', request.event_id)
+          .eq('coach_id', request.coach_id)
+        if (deleteError) {
+          message.error(`Couldn't remove the assignment: ${deleteError.message}`)
+          return
+        }
+      }
+
+      const { error } = await supabaseClient
+        .from('swap_requests')
+        .update({ status: decision, reviewed_by: identity?.id ?? null, reviewed_at: new Date().toISOString() })
+        .eq('id', request.id)
+      if (error) {
+        message.error(`Couldn't save the decision: ${error.message}`)
+        return
+      }
+      message.success(decision === 'approved' ? 'Swap approved -- coach removed from the assignment' : 'Swap denied')
+      swapRequestsQuery.refetch()
+    } finally {
+      setDecidingSwapId(null)
+    }
+  }
+
   const rows: ReconciledEntry[] = useMemo(
     () => (result?.data ?? []).map((e) => ({ ...e, reconciliationStatus: computeStatus(e) })),
     [result?.data],
@@ -261,6 +316,49 @@ export const Reconciliation = () => {
                   </Button>
                   <Button size="small" loading={decidingId === row.id} onClick={() => decide(row, 'declined')}>
                     Dismiss
+                  </Button>
+                </Space>
+              )}
+            />
+          </Table>
+        </Card>
+      )}
+
+      {swapRequests.length > 0 && (
+        <Card
+          title={`Swap requests (${swapRequests.length})`}
+          style={{ marginBottom: 16 }}
+          size="small"
+          loading={swapRequestsQuery.isLoading}
+        >
+          <Table dataSource={swapRequests} rowKey="id" pagination={false} size="small">
+            <Table.Column
+              title="Date"
+              width={110}
+              render={(_, row: SwapRequestRow) => row.events?.event_date ?? '—'}
+            />
+            <Table.Column
+              title="Coach"
+              render={(_, row: SwapRequestRow) => coachesById.get(row.coach_id)?.name ?? '—'}
+            />
+            <Table.Column title="Program" render={(_, row: SwapRequestRow) => row.events?.programs?.name ?? '—'} />
+            <Table.Column title="Location" render={(_, row: SwapRequestRow) => row.events?.locations?.name ?? '—'} />
+            <Table.Column title="Session" render={(_, row: SwapRequestRow) => row.events?.session_name ?? '—'} />
+            <Table.Column title="Reason" render={(_, row: SwapRequestRow) => row.reason || '—'} />
+            <Table.Column
+              title="Actions"
+              render={(_, row: SwapRequestRow) => (
+                <Space>
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={decidingSwapId === row.id}
+                    onClick={() => decideSwap(row, 'approved')}
+                  >
+                    Approve
+                  </Button>
+                  <Button size="small" loading={decidingSwapId === row.id} onClick={() => decideSwap(row, 'denied')}>
+                    Deny
                   </Button>
                 </Space>
               )}
