@@ -115,8 +115,10 @@ Considered "polish the existing Sheets/Apps Script system with a nicer frontend"
   what coaches pick from instead of typing times. Admin CRUD only so far — no write path yet for
   Sprocket to populate this other than the one-way CSV importer
 - `event_assignments` — new table, not in the original plan: which coach(es) are actually
-  scheduled to work a given event. Populated only by the Sprocket importer today; no admin UI to
-  assign a coach to an event by hand yet (this is the active work as of this session — see below)
+  scheduled to work a given event. Populated by the Sprocket importer or by hand via the admin
+  Schedule Board (`/schedule-board`, added in the scheduling & coach-confirmation work — see
+  below). Gained `coach_confirmed_at` (tap-to-confirm) alongside a column-scoped RLS grant so a
+  coach can only ever update that one column on their own row.
 - `timesheet_entries` — coach + event (nullable) + location (nullable) + status + notes + payment
   status/paid date — replaces the Master tab. Gained `flat_amount` (captures a dollar amount at
   creation time for flat-fee/reimbursement entries, rather than recomputing from current rates)
@@ -127,6 +129,10 @@ Considered "polish the existing Sheets/Apps Script system with a nicer frontend"
   oversight coach configured actually had oversight happen, so an admin confirms each one
   individually; approving creates a real, separately-payable `timesheet_entries` row for the
   oversight coach rather than it being an invisible side calculation
+- `swap_requests` — new table, not in the original plan: coach-initiated, admin-approved requests
+  to be removed from an assigned event (see "Phase 5 continued" below). Unlike
+  `oversight_approvals`, this has a real live `pending` state with admin UPDATE rights, since a
+  request can sit visibly pending before either the coach or an admin acts on it.
 
 Session codes (TYPE-MMDD-HHMM-INITIALS) were retired entirely, as predicted — the event's own ID
 is the match key. There turned out to be no Sprocket-side stable ID either (its CSV export has no
@@ -168,7 +174,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 2 | Coach-facing flow: log a session (program → event → submit) + "my sessions" view with date picker and logged/missing status. Bespoke, hand-built — not accelerated by Refine boilerplate. | ✅ Done, plus coach self-service edit/delete on pending entries (not originally scoped) |
 | 3 | Payroll views — Payment Due equivalent, payment status toggle, Paychex/Zoho exports | 🟡 Payment Due + toggle + Zoho export done; no Paychex export exists. Confirmed acceptable — W-2 pay runs through a separate service outside this app; only one-off `admin_only` entries (stipends) for a W-2 coach have no export path today, though Payment Due still tracks them and reimbursements already flow into the Zoho CSV regardless of pay_type |
 | 4 | Reconciliation rework — likely smaller than today's system once events are real records | ✅ Done, plus the 1v1 oversight-fee approval workflow (not originally scoped) |
-| 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🔵 In progress — see "Where things stand right now" |
+| 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -197,14 +203,13 @@ manually via the Supabase SQL Editor (no working Supabase CLI auth as of this se
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
 
-**Active work — Phase 5.** Today, `events`/`event_assignments` only ever get populated by
-importing a Sprocket calendar CSV export (one-way, manual, admin-run from `/sprocket-import`) —
-there's no way to assign a coach to an event by hand in the app, and no way to push events created
-here back out to Sprocket. Goal: make the app the actual source of truth rather than a mirror of
-Sprocket. Two pieces, decided but not yet built:
+**Active work — Phase 5.** `events`/`event_assignments` get populated by importing a Sprocket
+calendar CSV export (one-way, manual, admin-run from `/sprocket-import`), or, as of the scheduling
+& coach-confirmation work below, by hand from the admin Schedule Board. There's still no way to
+push events created here back out to Sprocket. Goal: make the app the actual source of truth
+rather than a mirror of Sprocket. Two pieces were identified; the first is done:
 
-1. **Admin coach-assignment UI** — assign one or more coaches to an event directly (new event or
-   existing one), writing to `event_assignments` the same way the importer does today.
+1. ~~**Admin coach-assignment UI**~~ — ✅ done, see "Phase 5 continued" below (the Schedule Board).
 2. **Export to Sprocket** — a CSV formatted for Sprocket's bulk-import template (shape TBD; the
    template file was supposed to be shared into the project folder but hasn't landed yet due to a
    filesystem permission issue reading the user's Downloads folder — needed before this can be
@@ -225,9 +230,8 @@ yet made:
 - `event_assignments` handling changes from add-only to delete-and-replace on a recognized match,
   so a dropped/swapped coach in Sprocket actually gets removed here too, not just appended to.
 
-Item 1 (assignment UI) doesn't depend on the template and can be built independently; item 2
-(export) and the importer reconciliation upgrade are blocked on seeing Sprocket's actual bulk-
-import column layout.
+Item 2 (export) and the importer reconciliation upgrade above are both still blocked on seeing
+Sprocket's actual bulk-import column layout.
 
 Not carried forward from the old system: the script-pusher/Cloud project/Apps Script API
 infrastructure, and the debugging detours that produced it (Drive upload conversion, OAuth scopes,
@@ -236,14 +240,16 @@ with no equivalent need here.
 
 ---
 
-## Phase 5 continued — scheduling & coach confirmation (decided, not yet built)
+## Phase 5 continued — scheduling & coach confirmation (✅ done, deployed 2026-09-26)
 
 Scoped in a claude.ai planning session on 2026-08-30, then reviewed against the actual codebase
-in Claude Code and corrected before being recorded here. Builds on the admin coach-assignment UI
-and Sprocket export described above — **neither of those is built yet either**, so this stacks a
-third layer of not-yet-built work on top of two others that aren't done. Sequencing decided: board
-view → tap-to-confirm → swap requests, in that order — each should work end to end before the next
-starts.
+in Claude Code and corrected before being recorded here. Built and verified end-to-end (schedule
+board assign/multi-assign, event recurrence + assign-on-create, coach "I'll be there", "Confirm
+hours", coach-side swap request, and admin approve/deny) against the real Supabase project on
+2026-09-26, then committed and deployed. Sequencing was board view → tap-to-confirm → swap
+requests, in that order, each verified working before the next started — the notes below are kept
+as the design record, not a still-open TODO. The Sprocket export and importer reconciliation
+upgrade described above remain unbuilt and are unaffected by this work.
 
 ### Admin scheduling board
 - Weekly board view (day columns, time-slotted event cards), color-coded by assignment status.
