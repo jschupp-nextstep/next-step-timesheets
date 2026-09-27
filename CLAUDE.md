@@ -112,13 +112,14 @@ Considered "polish the existing Sheets/Apps Script system with a nicer frontend"
   `direct_flat` / `admin_only` / `backend_only` / `reimbursement`) — drives which coach-facing UI
   flow, if any, a program uses (see below)
 - `events` — actual scheduled sessions (program, location, date/time) — replaces Camp_Locations;
-  what coaches pick from instead of typing times. Admin CRUD only so far — no write path yet for
-  Sprocket to populate this other than the one-way CSV importer
+  what coaches pick from instead of typing times. Admin CRUD, plus two bulk-load paths now: the
+  Sprocket CSV importer and the native bulk importer (`/bulk-import` — see "Native bulk importer"
+  below)
 - `event_assignments` — new table, not in the original plan: which coach(es) are actually
-  scheduled to work a given event. Populated by the Sprocket importer or by hand via the admin
-  Schedule Board (`/schedule-board`, added in the scheduling & coach-confirmation work — see
-  below). Gained `coach_confirmed_at` (tap-to-confirm) alongside a column-scoped RLS grant so a
-  coach can only ever update that one column on their own row.
+  scheduled to work a given event. Populated by the Sprocket importer, the native bulk importer,
+  or by hand via the admin Schedule Board (`/schedule-board`, added in the scheduling &
+  coach-confirmation work — see below). Gained `coach_confirmed_at` (tap-to-confirm) alongside a
+  column-scoped RLS grant so a coach can only ever update that one column on their own row.
 - `timesheet_entries` — coach + event (nullable) + location (nullable) + status + notes + payment
   status/paid date — replaces the Master tab. Gained `flat_amount` (captures a dollar amount at
   creation time for flat-fee/reimbursement entries, rather than recomputing from current rates)
@@ -181,6 +182,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 4 | Reconciliation rework — likely smaller than today's system once events are real records | ✅ Done, plus the 1v1 oversight-fee approval workflow (not originally scoped) |
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
+| 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -463,3 +465,78 @@ small modal prompting for hand-entered hours first, since there's no event to de
 requested hours; denial changes nothing. RLS gives coaches both insert and select on their own
 claims (not insert-only), so a denial is actually visible to them — the same asymmetry gap caught
 and fixed on `swap_requests` last time, not reintroduced here.
+
+---
+
+## Native bulk importer (✅ done, deployed 2026-09-27)
+
+The Sprocket CSV importer isn't a general-purpose uploader — it's a translator for one vendor's
+export, and that export has a real, unfixable gap: coach assignment only ever gets parsed for
+Camp rows, because Sprocket only encodes staffing via a Camp-specific `" - Director"`/
+`" - Counselor"` Title-suffix convention (confirmed directly against `parseSprocketCsv.ts` while
+diagnosing a hand-built Town Sessions test file — the coach-name extraction and multi-row
+grouping logic are both hard-gated on that suffix, not just conventionally Camp-flavored). Town
+Sessions and every other program never carry a parseable coach, and that data was never in
+Sprocket's export to begin with — no parser fix closes that gap. `/bulk-import` is the fix: a
+format this app defines itself, going straight into `events`/`event_assignments`, additive to the
+Sprocket importer (which is untouched — not a single line of `sprocket-import/index.tsx` or
+`parseSprocketCsv.ts` changed).
+
+**Format** (`src/utility/parseBulkImportCsv.ts`): `Program`, `Location`, `Date` (`YYYY-MM-DD`,
+chosen specifically to avoid Sprocket's `M/D/YYYY` ambiguity), `Start Time`/`End Time` (`HH:mm`
+24-hour, matching the admin-facing `TimePicker` convention used elsewhere — coach-facing screens
+use `h:mm A` instead), `Session Name` (optional), `Coaches` (semicolon-separated). One row is
+always one event — the whole point of this format is that `Coaches` supports multiple names
+natively, so none of Sprocket's row-collapsing/role-suffix grouping logic exists here at all. No
+`IsCancelled` column (deliberate): this format is for entering new schedule data; cancelling an
+existing event is naturally an edit-time action elsewhere, not something to bulk-declare at
+creation. No Camp half/full-day auto-resolution either — an admin importing a Camp session via
+this format specifies the real fixed-hours program (e.g. `Camp-Full Day`) directly, no
+vendor-specific guessing.
+
+**Separate page, not a mode on `/sprocket-import`** — confirmed by reading the existing importer's
+629 lines in full before deciding: it's one monolithic component, and almost nothing in it is
+factored for reuse. The only genuinely format-agnostic pieces are the `IGNORE`/`IGNORE_OPTION`
+sentinel and the localStorage remembered-mappings mechanism (both pulled out into a new
+`src/utility/importMappingStorage.ts`, parameterized by storage key, used only by the new
+importer — Sprocket's file keeps its own inline copy). Everything else — `LocationBlock`,
+`groupEventsByLocationBlock`, `resolveCampDayType`, the Camp half/full-day branch, the dated
+camp-location-block splitting — exists specifically to solve Sprocket-shaped problems this format
+doesn't have. A mode toggle would have meant heavy conditional branching for no real sharing
+benefit, and risked the existing (explicitly "leave untouched") tool.
+
+**Unmatched coaches block import — deliberately diverging from Sprocket's behavior.** Sprocket's
+importer lets an unmatched coach name through silently (the event still gets created, that one
+assignment is just skipped and counted). Here, every distinct coach name across the file must be
+either a real `coaches.name` match or an explicit `"Leave unassigned"` sentinel before the Confirm
+button unlocks — same blocking treatment as Programs/Locations, just with a third option instead
+of only two, since "the gate is *you haven't decided*, not *a match is mandatory*." No
+auto-create of coach records from unmatched names, ever — a typo should surface to a human, not
+silently create a ghost coach. Verified in isolation (not just as part of a larger resolved/
+unresolved mix): a single-row file with an already-auto-resolved Program and Location and only an
+unmatched coach name keeps the Confirm button `disabled: true`; selecting "Leave unassigned"
+flips it to `false` with nothing else touched.
+
+**Intra-file duplicate-row warning** — new, and not something Sprocket's importer needs. Two rows
+in the *same upload* sharing identical Program/Location/Date/Time/Session Name but different
+`Coaches` (e.g. a CSV author reverting to one-row-per-coach out of old Sprocket habit) would
+otherwise import the first row, then silently get skipped as "already exists" on the second —
+dropping that second row's coaches with no warning, since the in-memory dedup signature is added
+after the first insert. Sprocket never needs this check because its Camp grouping merges by
+design; this format has no such merging, so a same-file duplicate is always a mistake, and blocks
+Confirm (not just a warning) until the file is fixed. Verified directly: two rows differing only
+in `Coaches` produced a "Duplicate rows found in this file" alert naming both row numbers, and
+Confirm stayed locked even after every other mapping was separately resolved.
+
+**Duplicate handling against the database** reuses Sprocket's exact signature shape
+(`[program_id, location_id, event_date, start_time, end_time, session_name].join('|')`) unchanged,
+since both importers write to the same `events` table — a useful side effect is that the two
+importers naturally dedupe against each other, not just against themselves.
+
+**RLS — confirmed, zero changes needed.** Read `0004_phase2_schema.sql`, `0005_...`, `0006_...`,
+and `0011_coach_confirm.sql` in full before building: `events` already restricts INSERT/UPDATE/
+DELETE to `is_admin()`, and `event_assignments` has **no coach-facing INSERT/DELETE policy at
+all** — only an admin `for all` policy, a coach read-only self-select, and a coach column-scoped
+update limited to `coach_confirmed_at`. That already fully satisfies "admin-only write path, no
+new coach-facing surface" — the new page just needed to live under `AdminRoutes` like
+`/sprocket-import` does. No migration, no RLS change, for this entire feature.
