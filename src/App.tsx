@@ -59,6 +59,9 @@ const EntryEdit = lazy(() => import('./pages/entries/edit').then((m) => ({ defau
 const SprocketImport = lazy(() =>
   import('./pages/sprocket-import').then((m) => ({ default: m.SprocketImport })),
 )
+const BulkImport = lazy(() =>
+  import('./pages/bulk-import').then((m) => ({ default: m.BulkImport })),
+)
 const Reconciliation = lazy(() =>
   import('./pages/reconciliation').then((m) => ({ default: m.Reconciliation })),
 )
@@ -149,6 +152,7 @@ const AdminRoutes = () => (
         <Route path="edit/:id" element={<EntryEdit />} />
       </Route>
       <Route path="/sprocket-import" element={<SprocketImport />} />
+      <Route path="/bulk-import" element={<BulkImport />} />
       <Route path="/reconciliation" element={<Reconciliation />} />
       <Route path="/payment-due" element={<PaymentDue />} />
       <Route path="/zoho-export" element={<ZohoExport />} />
@@ -298,6 +302,11 @@ function App() {
                   list: '/entries',
                   edit: '/entries/edit/:id',
                   meta: { label: 'Timesheet Entries' },
+                },
+                {
+                  name: 'bulk-import',
+                  list: '/bulk-import',
+                  meta: { label: 'Bulk Import Events' },
                 },
                 {
                   name: 'sprocket-import',
