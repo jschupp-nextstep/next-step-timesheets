@@ -133,6 +133,12 @@ Considered "polish the existing Sheets/Apps Script system with a nicer frontend"
   to be removed from an assigned event (see "Phase 5 continued" below). Unlike
   `oversight_approvals`, this has a real live `pending` state with admin UPDATE rights, since a
   request can sit visibly pending before either the coach or an admin acts on it.
+- `pay_periods` — new table, not in the original plan: simple admin-managed start/end date
+  reference rows, hand-correctable rather than computed off a fixed cadence. Exists purely to
+  define the coach-facing logging-window bands (see "Pay-period logging windows" below).
+- `payment_claims` — new table, not in the original plan: one review queue, four claim types
+  (`late_event`, `unassigned_claim`, `unstructured`, `hours_correction`), same live-`pending`-state
+  pattern as `swap_requests` rather than `oversight_approvals`' insert-only shape.
 
 Session codes (TYPE-MMDD-HHMM-INITIALS) were retired entirely, as predicted — the event's own ID
 is the match key. There turned out to be no Sprocket-side stable ID either (its CSV export has no
@@ -150,11 +156,10 @@ type on either side — it exists purely as the rate-lookup fallback target.
 
 ### Confirmed feature scope (beyond core log-a-session flow)
 - **Date picker for past/current days**, not just "today" — coaches log Tuesday's session on
-  Thursday, same event list, filtered by chosen date. **Policy question deliberately deferred:**
-  should logging be allowed indefinitely into the past, or capped to something like the current
-  pay period? Decision postponed until closer to Phase 2, since the answer may depend on how long
-  the build takes (the old system is being kept running and stable in the meantime, so there's no
-  urgency to lock this down now).
+  Thursday, same event list, filtered by chosen date. **Policy question resolved** (was
+  deliberately deferred here since Phase 2): see "Pay-period logging windows" below — self-service
+  is capped to the current pay period + 1 back; anything older routes through the
+  `payment_claims` review queue instead of being blocked outright or left unlimited.
 - **"My sessions" view**: coach's scheduled events split into logged vs. not-yet-logged, pulled
   from the same event data. Should shrink (not necessarily eliminate) the existing verification
   workflow, since gaps become visible in real time instead of being caught after the fact against
@@ -175,6 +180,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 3 | Payroll views — Payment Due equivalent, payment status toggle, Paychex/Zoho exports | 🟡 Payment Due + toggle + Zoho export done; no Paychex export exists. Confirmed acceptable — W-2 pay runs through a separate service outside this app; only one-off `admin_only` entries (stipends) for a W-2 coach have no export path today, though Payment Due still tracks them and reimbursements already flow into the Zoho CSV regardless of pay_type |
 | 4 | Reconciliation rework — likely smaller than today's system once events are real records | ✅ Done, plus the 1v1 oversight-fee approval workflow (not originally scoped) |
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
+| 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -198,7 +204,7 @@ hours. Justin has full summer runway, not a tight 2–3 week window.
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0009`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0014`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -375,3 +381,85 @@ format). Decided **not** to build bespoke in-app parsers for either.
   pending rows (probably admin-entered on a coach's behalf) rather than through
   `events`/`event_assignments` at all. **Not designed in detail yet — scoped as a separate, later
   piece of work**, not bundled into "the same importer" the way it first sounded.
+
+---
+
+## Pay-period logging windows & payment claims queue (✅ done, deployed 2026-09-27)
+
+Extends the same "small/routine stays fast, anything else gets reviewed" principle already built
+into `oversight_approvals` and `swap_requests` to session logging generally: coaches can only
+self-service log what's genuinely current; anything older, unverifiable, or claiming an assignment
+they weren't given routes through `payment_claims` for admin review instead. Scoped in a claude.ai
+planning session, corrected against the actual codebase in Claude Code before being recorded, then
+built and verified end-to-end against the real Supabase project before shipping.
+
+**`pay_periods`**: admin-managed start/end date rows (`/pay-periods`, modeled on the `events`
+admin CRUD pattern). Band boundaries are computed **client-side** (`src/utils/payPeriods.ts`) by
+**row position**, not elapsed days — "current period" is the most recent row whose `start_date`
+has passed, counting back from there — so editing dates later doesn't reshuffle bands relative to
+a hardcoded interval, and an admin running a few days behind on creating the next period doesn't
+strand today's date with no current period at all. With fewer than 4 periods defined, or before
+any period has started, everything falls through to the fully-reviewed Band C path rather than the
+app guessing — **this table needs real rows before the banding behavior does anything meaningful**
+(with none configured, every date classifies as Band C).
+
+**Three bands, `/log-session`** (gates only the `session`-entry_mode flow — `direct_time`/
+`direct_flat`/reimbursement are unaffected by band, in every band, since they have no calendar
+counterpart to be ambiguous against):
+- **Band A** (current period + 1 back): the normal picker, gained two new filters — excludes
+  events already paid for, and (a correction to this feature's own initial assumption: the picker
+  had **zero** coach-assignment filtering before this, confirmed by reading the code, not "already
+  true today" as first assumed) now restricted to events this coach is actually assigned to. This
+  is a real, deliberate behavior change beyond just adding the new bands, made specifically so
+  "Don't see something you coached?" (below) isn't pointless — without it, a coach could just log
+  an unassigned event the normal way with no review at all.
+- **Band B** (periods 3–4 back): "late request" — same cascading picker, unfiltered by assignment,
+  but submits a `late_event` claim instead of logging directly.
+- **Band C** (older): no event picker — a structured form (program/location/reason
+  category/notes) submitting an `unstructured` claim, `event_id` null.
+
+**"Don't see something you coached?"** (`/my-sessions/unassigned-claim`): Band-A-scoped event
+picker, unfiltered by assignment, for flagging an event you weren't listed on (or nobody was) —
+submits an `unassigned_claim`. Deliberately did not touch the existing "Other (not on the
+calendar)" hatch or Reconciliation's existing mismatch flagging — both already cover adjacent
+cases and needed no changes.
+
+**"Confirm hours" needed zero code changes** — verified directly before building anything: it
+already inserted straight from the event's scheduled start/end via the existing
+`resolveEventHours`/`timeSpanHours` logic (now lifted out to `src/utils/hours.ts` since correction
+requests and admin claim-approval both need the same functions), with no coach-editable time
+fields anywhere in that path. It was already a pure confirm.
+
+**Self-edit lockdown — the real gap, more specific than it first sounded**: the actual bypass
+wasn't "hours/time fields are directly editable" on a session-linked pending entry (they weren't).
+It was that switching **Location to "Other (not on the calendar)"** mid-edit re-routed the whole
+entry around its event link entirely, swapping in free-form time inputs RLS already permitted the
+coach to save with zero review. Fixed by rendering session-linked pending entries as a read-only
+summary in edit mode (structurally unreachable to that Location switch) with a link to "Request a
+correction" instead — not by patching the two fields that didn't exist for that path anyway.
+
+**"Request a correction"** (`/log-session/correct/:eventId`): proposed hours (time-span
+`TimePicker`s for regular programs, a plain hours `InputNumber` for Camp/Nurse fixed-hours
+programs, since they have no time span to propose) + required reason, always reviewed regardless
+of size — no tolerance threshold of any kind. Works both pre- and post-"Confirm hours" (`entry_id`
+null vs. set on the claim, so admin approval knows whether to insert a new entry or update the
+existing one). **Resubmitting while a correction is already pending updates that claim in place**
+rather than trying to insert a second one — caught during manual testing when a real duplicate
+attempt hit the partial unique index and just failed with no path forward; fixed same session.
+
+**`payment_claims` gained two columns beyond the version scoped in chat** (both necessary to make
+that version's own requirements representable, not scope creep): `entry_id` (so an approved
+`hours_correction` claim updates the exact entry it's correcting rather than re-deriving one from
+`(coach_id, event_id)`, which is ambiguous if the coach deletes/re-logs in between) and `notes`
+(Band C's form needs both a fixed reason-category dropdown and free-text elaboration; `reason`
+alone couldn't hold both).
+
+**Admin review** (`/reconciliation`, new "Payment claims" card, filterable by type): `late_event`
+and `unassigned_claim` approve identically (insert a normal entry from the event +
+`resolveEventHours` — they only differ in *why* the claim exists). `unstructured` approval needs a
+small modal prompting for hand-entered hours first, since there's no event to derive them from
+(mirrors the plain hours `InputNumber` already on the generic admin Timesheet Entries edit screen).
+`hours_correction` approval updates the linked entry (or inserts one, pre-confirm case) with the
+requested hours; denial changes nothing. RLS gives coaches both insert and select on their own
+claims (not insert-only), so a denial is actually visible to them — the same asymmetry gap caught
+and fixed on `swap_requests` last time, not reintroduced here.
