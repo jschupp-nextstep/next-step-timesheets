@@ -46,6 +46,37 @@ const SWAP_STATUS_META: Record<SwapRequestRow['status'], { label: string; color:
   denied: { label: 'Denied', color: 'red' },
 }
 
+type PaymentClaimRow = {
+  id: string
+  event_id: string | null
+  claim_type: 'late_event' | 'unassigned_claim' | 'unstructured' | 'hours_correction'
+  approx_date: string | null
+  reason: string | null
+  status: 'pending' | 'approved' | 'denied'
+  requested_at: string
+  events: {
+    event_date: string
+    session_name: string | null
+    programs: { name: string } | null
+    locations: { name: string } | null
+  } | null
+  programs: { name: string } | null
+  locations: { name: string } | null
+}
+
+const CLAIM_STATUS_META: Record<PaymentClaimRow['status'], { label: string; color: string }> = {
+  pending: { label: 'Pending', color: 'gold' },
+  approved: { label: 'Approved', color: 'green' },
+  denied: { label: 'Denied', color: 'red' },
+}
+
+const CLAIM_TYPE_LABELS: Record<PaymentClaimRow['claim_type'], string> = {
+  late_event: 'Late request',
+  unassigned_claim: 'Unassigned claim',
+  unstructured: 'Unverified claim',
+  hours_correction: 'Hours correction',
+}
+
 type TimesheetEntryRow = {
   id: string
   entry_date: string
@@ -134,9 +165,31 @@ export const MySessions = () => {
     queryOptions: { enabled: !!coachId },
   })
 
+  const { result: paymentClaimsResult, query: paymentClaimsQuery } = useList<PaymentClaimRow>({
+    resource: 'payment_claims',
+    meta: {
+      select: '*, events(event_date, session_name, programs(name), locations(name)), programs(name), locations(name)',
+    },
+    filters: [{ field: 'coach_id', operator: 'eq', value: coachId }],
+    sorters: [{ field: 'requested_at', order: 'desc' }],
+    pagination: { pageSize: 200 },
+    queryOptions: { enabled: !!coachId },
+  })
+
   const assignments = assignmentsResult?.data ?? []
   const entries = entriesResult?.data ?? []
   const swapRequests = swapRequestsResult?.data ?? []
+  const paymentClaims = paymentClaimsResult?.data ?? []
+
+  const pendingCorrectionEventIds = useMemo(
+    () =>
+      new Set(
+        paymentClaims
+          .filter((c) => c.claim_type === 'hours_correction' && c.status === 'pending')
+          .map((c) => c.event_id),
+      ),
+    [paymentClaims],
+  )
 
   const pendingSwapEventIds = useMemo(
     () => new Set(swapRequests.filter((r) => r.status === 'pending').map((r) => r.event_id)),
@@ -296,7 +349,14 @@ export const MySessions = () => {
                   title="Actions"
                   render={(_, row: NotYetLoggedRow) => (
                     <Space>
-                      <Link to={`/log-session/confirm/${row.id}`}>Confirm hours</Link>
+                      {pendingCorrectionEventIds.has(row.id) ? (
+                        <Tag color="gold">Correction pending</Tag>
+                      ) : (
+                        <>
+                          <Link to={`/log-session/confirm/${row.id}`}>Confirm hours</Link>
+                          <Link to={`/log-session/correct/${row.id}`}>Request a correction</Link>
+                        </>
+                      )}
                       {pendingSwapEventIds.has(row.id) ? (
                         <Tag color="gold">Swap requested</Tag>
                       ) : (
@@ -316,6 +376,10 @@ export const MySessions = () => {
             )}
           </Card>
 
+          <Typography.Paragraph>
+            <Link to="/my-sessions/unassigned-claim">Don't see something you coached?</Link>
+          </Typography.Paragraph>
+
           {swapRequests.length > 0 && (
             <Card title="Swap requests" style={{ marginBottom: 16 }} size="small" loading={isLoading}>
               <Table<SwapRequestRow> dataSource={swapRequests} rowKey="id" pagination={false} size="small">
@@ -332,6 +396,35 @@ export const MySessions = () => {
                   title="Status"
                   render={(_, row: SwapRequestRow) => {
                     const meta = SWAP_STATUS_META[row.status]
+                    return <Tag color={meta.color}>{meta.label}</Tag>
+                  }}
+                />
+              </Table>
+            </Card>
+          )}
+
+          {paymentClaims.length > 0 && (
+            <Card title="Payment claims" style={{ marginBottom: 16 }} size="small" loading={paymentClaimsQuery.isLoading}>
+              <Table<PaymentClaimRow> dataSource={paymentClaims} rowKey="id" pagination={false} size="small">
+                <Table.Column
+                  title="Date"
+                  width={110}
+                  render={(_, row: PaymentClaimRow) => row.events?.event_date ?? row.approx_date ?? '—'}
+                />
+                <Table.Column title="Type" render={(_, row: PaymentClaimRow) => CLAIM_TYPE_LABELS[row.claim_type]} />
+                <Table.Column
+                  title="Program"
+                  render={(_, row: PaymentClaimRow) => row.events?.programs?.name ?? row.programs?.name ?? '—'}
+                />
+                <Table.Column
+                  title="Location"
+                  render={(_, row: PaymentClaimRow) => row.events?.locations?.name ?? row.locations?.name ?? '—'}
+                />
+                <Table.Column title="Reason" render={(_, row: PaymentClaimRow) => row.reason || '—'} />
+                <Table.Column
+                  title="Status"
+                  render={(_, row: PaymentClaimRow) => {
+                    const meta = CLAIM_STATUS_META[row.status]
                     return <Tag color={meta.color}>{meta.label}</Tag>
                   }}
                 />
@@ -372,7 +465,15 @@ export const MySessions = () => {
                   title="Actions"
                   render={(_, row: TimesheetEntryRow) => (
                     <Space>
-                      <Link to={`/log-session/edit/${row.id}`}>Edit</Link>
+                      {row.event_id ? (
+                        pendingCorrectionEventIds.has(row.event_id) ? (
+                          <Tag color="gold">Correction pending</Tag>
+                        ) : (
+                          <Link to={`/log-session/correct/${row.event_id}`}>Request a correction</Link>
+                        )
+                      ) : (
+                        <Link to={`/log-session/edit/${row.id}`}>Edit</Link>
+                      )}
                       <Popconfirm
                         title="Delete this entry?"
                         okText="Delete"

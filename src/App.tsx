@@ -30,6 +30,11 @@ const LocationCreate = lazy(() =>
   import('./pages/locations/create').then((m) => ({ default: m.LocationCreate })),
 )
 const LocationEdit = lazy(() => import('./pages/locations/edit').then((m) => ({ default: m.LocationEdit })))
+const PayPeriodList = lazy(() => import('./pages/pay-periods/list').then((m) => ({ default: m.PayPeriodList })))
+const PayPeriodCreate = lazy(() =>
+  import('./pages/pay-periods/create').then((m) => ({ default: m.PayPeriodCreate })),
+)
+const PayPeriodEdit = lazy(() => import('./pages/pay-periods/edit').then((m) => ({ default: m.PayPeriodEdit })))
 const RateList = lazy(() => import('./pages/rates/list').then((m) => ({ default: m.RateList })))
 const RateCreate = lazy(() => import('./pages/rates/create').then((m) => ({ default: m.RateCreate })))
 const RateEdit = lazy(() => import('./pages/rates/edit').then((m) => ({ default: m.RateEdit })))
@@ -69,6 +74,9 @@ const LogSession = lazy(() =>
 )
 const MySessions = lazy(() =>
   import('./pages/coach/my-sessions').then((m) => ({ default: m.MySessions })),
+)
+const UnassignedClaim = lazy(() =>
+  import('./pages/coach/unassigned-claim').then((m) => ({ default: m.UnassignedClaim })),
 )
 
 const PageLoading = () => (
@@ -115,6 +123,11 @@ const AdminRoutes = () => (
         <Route path="create" element={<LocationCreate />} />
         <Route path="edit/:id" element={<LocationEdit />} />
       </Route>
+      <Route path="/pay-periods">
+        <Route index element={<PayPeriodList />} />
+        <Route path="create" element={<PayPeriodCreate />} />
+        <Route path="edit/:id" element={<PayPeriodEdit />} />
+      </Route>
       <Route path="/rates">
         <Route index element={<RateList />} />
         <Route path="create" element={<RateCreate />} />
@@ -151,7 +164,9 @@ const CoachRoutes = () => (
       <Route path="/log-session" element={<LogSession />} />
       <Route path="/log-session/edit/:id" element={<LogSession />} />
       <Route path="/log-session/confirm/:eventId" element={<LogSession />} />
+      <Route path="/log-session/correct/:correctEventId" element={<LogSession />} />
       <Route path="/my-sessions" element={<MySessions />} />
+      <Route path="/my-sessions/unassigned-claim" element={<UnassignedClaim />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
   </CoachLayout>
@@ -244,6 +259,13 @@ function App() {
                   create: '/locations/create',
                   edit: '/locations/edit/:id',
                   meta: { label: 'Locations' },
+                },
+                {
+                  name: 'pay_periods',
+                  list: '/pay-periods',
+                  create: '/pay-periods/create',
+                  edit: '/pay-periods/edit/:id',
+                  meta: { label: 'Pay Periods' },
                 },
                 {
                   name: 'rates',

@@ -2,10 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useGetIdentity, useList, useOne } from '@refinedev/core'
 import { Alert, App, Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, TimePicker, Typography } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
+import { FIXED_HOURS_HALF, FIXED_HOURS_FULL, timeSpanHours, resolveEventHours } from '../../utils/hours'
+import { computeBands, classifyDate, type PayPeriod } from '../../utils/payPeriods'
+import { BandCUnstructuredClaimForm } from './BandCUnstructuredClaimForm'
 
 type ProgramRow = { id: string; name: string; entry_mode: string }
 type LocationRow = { id: string; name: string; half_day_hours: number | null; full_day_hours: number | null }
@@ -33,12 +36,6 @@ type TimesheetEntryDetail = {
   status: 'pending' | 'paid'
 }
 
-// Camp/Nurse programs pay a fixed number of hours looked up from the
-// event's location -- never calculated from a time span, and locked from
-// manual entry (mirrors the old system's Sheets data-validation rule).
-const FIXED_HOURS_HALF = new Set(['Camp-Half Day', 'Nurse-Half Day'])
-const FIXED_HOURS_FULL = new Set(['Camp-Full Day', 'Nurse-Full Day'])
-
 const OTHER = '__other__'
 
 // 1v1 / Private Training pay is a flat fee looked up by coach (not
@@ -51,29 +48,15 @@ const DIRECT_FLAT_DURATIONS = [
   { label: '120 minutes', value: 120 },
 ]
 
-function timeSpanHours(start: string | null, end: string | null): number | null {
-  if (!start || !end) return null
-  const startTime = dayjs(`2000-01-01T${start}`)
-  const endTime = dayjs(`2000-01-01T${end}`)
-  if (!startTime.isValid() || !endTime.isValid()) return null
-  const hours = endTime.diff(startTime, 'minute') / 60
-  return hours > 0 ? hours : null
-}
-
-function resolveEventHours(programName: string, event: EventRow, location: LocationRow | undefined): number | null {
-  if (FIXED_HOURS_HALF.has(programName)) return location?.half_day_hours ?? null
-  if (FIXED_HOURS_FULL.has(programName)) return location?.full_day_hours ?? null
-  return timeSpanHours(event.start_time, event.end_time)
-}
-
 export const LogSession = () => {
   const { message } = App.useApp()
   const { data: identity } = useGetIdentity<Identity>()
   const coachId = identity?.role === 'coach' ? identity.coachId : undefined
   const navigate = useNavigate()
-  const { id: editId, eventId: confirmEventId } = useParams()
+  const { id: editId, eventId: confirmEventId, correctEventId } = useParams()
   const isEditMode = !!editId
   const isConfirmMode = !!confirmEventId
+  const isCorrectionMode = !!correctEventId
 
   const { result: editEntryResult, query: editEntryQuery } = useOne<TimesheetEntryDetail>({
     resource: 'timesheet_entries',
@@ -86,6 +69,41 @@ export const LogSession = () => {
     id: confirmEventId,
     queryOptions: { enabled: isConfirmMode },
   })
+  const { result: correctionEventResult, query: correctionEventQuery } = useOne<EventRow>({
+    resource: 'events',
+    id: correctEventId,
+    queryOptions: { enabled: isCorrectionMode },
+  })
+  const { result: correctionProgramResult, query: correctionProgramQuery } = useOne<ProgramRow>({
+    resource: 'programs',
+    id: correctionEventResult?.program_id,
+    queryOptions: { enabled: isCorrectionMode && !!correctionEventResult },
+  })
+  const { result: existingEntryResult, query: existingEntryQuery } = useList<TimesheetEntryDetail>({
+    resource: 'timesheet_entries',
+    filters: [
+      { field: 'coach_id', operator: 'eq', value: coachId },
+      { field: 'event_id', operator: 'eq', value: correctEventId },
+      { field: 'status', operator: 'eq', value: 'pending' },
+    ],
+    queryOptions: { enabled: isCorrectionMode && !!coachId },
+  })
+  const existingEntry = existingEntryResult?.data?.[0]
+  // A coach re-opening this page after already submitting a correction for
+  // the same session shouldn't hit the partial-unique-index violation on
+  // resubmit -- find any still-pending claim so submit can update it in
+  // place instead of trying (and failing) to insert a second one.
+  const { result: existingClaimResult, query: existingClaimQuery } = useList<{ id: string }>({
+    resource: 'payment_claims',
+    filters: [
+      { field: 'coach_id', operator: 'eq', value: coachId },
+      { field: 'event_id', operator: 'eq', value: correctEventId },
+      { field: 'claim_type', operator: 'eq', value: 'hours_correction' },
+      { field: 'status', operator: 'eq', value: 'pending' },
+    ],
+    queryOptions: { enabled: isCorrectionMode && !!coachId },
+  })
+  const existingClaim = existingClaimResult?.data?.[0]
   const populatedRef = useRef(false)
 
   const [entryDate, setEntryDate] = useState<Dayjs>(dayjs())
@@ -102,6 +120,15 @@ export const LogSession = () => {
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  const [bandBReason, setBandBReason] = useState('')
+  const [bandBSubmitting, setBandBSubmitting] = useState(false)
+
+  const [correctionStart, setCorrectionStart] = useState<Dayjs | null>(null)
+  const [correctionEnd, setCorrectionEnd] = useState<Dayjs | null>(null)
+  const [correctionHoursInput, setCorrectionHoursInput] = useState<number | null>(null)
+  const [correctionReason, setCorrectionReason] = useState('')
+  const [correctionSubmitting, setCorrectionSubmitting] = useState(false)
+
   const { result: programsResult } = useList<ProgramRow>({
     resource: 'programs',
     filters: [
@@ -116,10 +143,18 @@ export const LogSession = () => {
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { pageSize: 200 },
   })
+  const { result: periodsResult, query: periodsQuery } = useList<PayPeriod>({
+    resource: 'pay_periods',
+    sorters: [{ field: 'start_date', order: 'asc' }],
+    pagination: { pageSize: 500 },
+  })
 
   const programs = programsResult?.data ?? []
   const locations = locationsResult?.data ?? []
   const locationsById = useMemo(() => new Map(locations.map((l) => [l.id, l])), [locations])
+
+  const bands = useMemo(() => computeBands(periodsResult?.data ?? [], dayjs().format('YYYY-MM-DD')), [periodsResult?.data])
+  const band = useMemo(() => classifyDate(bands, entryDate.format('YYYY-MM-DD')), [bands, entryDate])
 
   useEffect(() => {
     if (!isConfirmMode || populatedRef.current || !confirmEventResult) return
@@ -161,6 +196,16 @@ export const LogSession = () => {
     }
   }, [isEditMode, editEntry, programs])
 
+  useEffect(() => {
+    if (!isCorrectionMode || populatedRef.current || !correctionEventResult) return
+    populatedRef.current = true
+
+    setCorrectionStart(
+      correctionEventResult.start_time ? dayjs(`2000-01-01T${correctionEventResult.start_time}`) : null,
+    )
+    setCorrectionEnd(correctionEventResult.end_time ? dayjs(`2000-01-01T${correctionEventResult.end_time}`) : null)
+  }, [isCorrectionMode, correctionEventResult])
+
   const selectedProgram = programs.find((p) => p.id === programId)
   const isSessionMode = selectedProgram?.entry_mode === 'session'
   const isDirectTime = selectedProgram?.entry_mode === 'direct_time'
@@ -179,26 +224,67 @@ export const LogSession = () => {
   })
   const events = eventsResult?.data ?? []
 
+  // Band A gets two extra filters beyond date/program/not-cancelled: only
+  // events this coach is actually assigned to, and never one they've
+  // already been paid for. Band B deliberately skips both -- "not filtered
+  // to the coach's own assignments" is the whole point of a late request.
+  const { result: myAssignmentsResult } = useList<{ event_id: string }>({
+    resource: 'event_assignments',
+    meta: { select: 'event_id, events!inner(event_date)' },
+    filters: [
+      { field: 'coach_id', operator: 'eq', value: coachId },
+      { field: 'events.event_date', operator: 'eq', value: entryDate.format('YYYY-MM-DD') },
+    ],
+    queryOptions: { enabled: isSessionMode && band === 'A' && !!programId && !!coachId },
+  })
+  const myAssignedEventIds = useMemo(
+    () => new Set((myAssignmentsResult?.data ?? []).map((a) => a.event_id)),
+    [myAssignmentsResult?.data],
+  )
+  const { result: paidEventsResult } = useList<{ event_id: string | null }>({
+    resource: 'timesheet_entries',
+    meta: { select: 'event_id' },
+    filters: [
+      { field: 'coach_id', operator: 'eq', value: coachId },
+      { field: 'status', operator: 'eq', value: 'paid' },
+      { field: 'event_id', operator: 'nnull', value: true },
+    ],
+    queryOptions: { enabled: isSessionMode && band === 'A' && !!coachId },
+  })
+  const paidEventIds = useMemo(
+    () => new Set((paidEventsResult?.data ?? []).map((e) => e.event_id).filter((id): id is string => !!id)),
+    [paidEventsResult?.data],
+  )
+
+  const bandAEvents = useMemo(
+    () => events.filter((e) => myAssignedEventIds.has(e.id) && !paidEventIds.has(e.id)),
+    [events, myAssignedEventIds, paidEventIds],
+  )
+
+  // Band A uses the doubly-filtered list; Band B (a late/unverified claim)
+  // deliberately browses every event for the date/program, unfiltered.
+  const pickerEvents = band === 'A' ? bandAEvents : events
+
   const locationOptions = useMemo(() => {
-    const distinctIds = Array.from(new Set(events.map((e) => e.location_id)))
+    const distinctIds = Array.from(new Set(pickerEvents.map((e) => e.location_id)))
     return distinctIds
       .map((id) => locationsById.get(id))
       .filter((l): l is LocationRow => !!l)
       .map((l) => ({ label: l.name, value: l.id }))
-  }, [events, locationsById])
+  }, [pickerEvents, locationsById])
 
   const eventOptions = useMemo(
     () =>
-      events
+      pickerEvents
         .filter((e) => e.location_id === locationId)
         .map((e) => ({
           label: `${e.session_name || 'Untitled session'}${e.start_time ? ` (${dayjs(`2000-01-01T${e.start_time}`).format('h:mm A')}${e.end_time ? ` – ${dayjs(`2000-01-01T${e.end_time}`).format('h:mm A')}` : ''})` : ''}`,
           value: e.id,
         })),
-    [events, locationId],
+    [pickerEvents, locationId],
   )
 
-  const selectedEvent = events.find((e) => e.id === eventId)
+  const selectedEvent = pickerEvents.find((e) => e.id === eventId)
   const selectedLocation = locationId ? locationsById.get(locationId) : undefined
   const resolvedHours =
     selectedProgram && selectedEvent ? resolveEventHours(selectedProgram.name, selectedEvent, selectedLocation) : null
@@ -224,6 +310,7 @@ export const LogSession = () => {
     setDirectFlatMinutes(null)
     setReimbursementAmount(null)
     setNotes('')
+    setBandBReason('')
   }
 
   const canSubmit = (() => {
@@ -231,7 +318,7 @@ export const LogSession = () => {
     if (isReimbursement) return !!notes.trim() && reimbursementAmount != null && reimbursementAmount > 0
     if (isDirectFlat) return !!notes.trim() && directFlatMinutes != null
     if (isDirectTime) return !!directStart && !!directEnd && directHours != null
-    if (isSessionMode) {
+    if (isSessionMode && band === 'A') {
       if (locationId === OTHER) return !!otherSessionName.trim() && !!otherStart && !!otherEnd && otherHours != null
       return !!locationId && !!eventId && resolvedHours != null
     }
@@ -338,6 +425,87 @@ export const LogSession = () => {
     }
   }
 
+  const canSubmitBandB = !!programId && !!locationId && !!eventId && !!bandBReason.trim()
+
+  const handleBandBSubmit = async () => {
+    if (!coachId || !canSubmitBandB) return
+    setBandBSubmitting(true)
+    try {
+      const { error } = await supabaseClient.from('payment_claims').insert({
+        coach_id: coachId,
+        claim_type: 'late_event',
+        event_id: eventId,
+        program_id: programId,
+        location_id: locationId,
+        reason: bandBReason.trim(),
+        status: 'pending',
+      })
+      if (error) {
+        message.error(
+          error.code === '23505' ? "You already have a pending claim for this event." : `Couldn't submit: ${error.message}`,
+        )
+        return
+      }
+      message.success('Sent to an admin for review.')
+      resetForm()
+    } finally {
+      setBandBSubmitting(false)
+    }
+  }
+
+  const isFixedHoursCorrection = correctionProgramResult
+    ? FIXED_HOURS_HALF.has(correctionProgramResult.name) || FIXED_HOURS_FULL.has(correctionProgramResult.name)
+    : false
+  const correctionScheduledHours =
+    correctionEventResult && correctionProgramResult
+      ? resolveEventHours(
+          correctionProgramResult.name,
+          correctionEventResult,
+          locationsById.get(correctionEventResult.location_id),
+        )
+      : null
+  const correctionRequestedHours = isFixedHoursCorrection
+    ? correctionHoursInput
+    : timeSpanHours(correctionStart?.format('HH:mm:ss') ?? null, correctionEnd?.format('HH:mm:ss') ?? null)
+  const canSubmitCorrection =
+    !!correctionReason.trim() && correctionRequestedHours != null && correctionRequestedHours > 0
+
+  const handleSubmitCorrection = async () => {
+    if (!coachId || !correctionEventResult || !canSubmitCorrection) return
+    setCorrectionSubmitting(true)
+    try {
+      const payload = {
+        coach_id: coachId,
+        claim_type: 'hours_correction',
+        event_id: correctionEventResult.id,
+        entry_id: existingEntry?.id ?? null,
+        program_id: correctionEventResult.program_id,
+        location_id: correctionEventResult.location_id,
+        scheduled_hours: correctionScheduledHours,
+        requested_hours: correctionRequestedHours,
+        reason: correctionReason.trim(),
+        status: 'pending',
+      }
+      // Resubmitting while a correction is already pending updates it in
+      // place rather than inserting a second row -- there's nothing useful
+      // about keeping the coach's first, since-revised attempt around, and
+      // the partial unique index would reject a second insert anyway.
+      const { error } = existingClaim
+        ? await supabaseClient.from('payment_claims').update(payload).eq('id', existingClaim.id)
+        : await supabaseClient.from('payment_claims').insert(payload)
+      if (error) {
+        message.error(`Couldn't submit: ${error.message}`)
+        return
+      }
+      message.success(
+        existingClaim ? 'Correction request updated.' : 'Correction request sent to an admin for review.',
+      )
+      navigate('/my-sessions')
+    } finally {
+      setCorrectionSubmitting(false)
+    }
+  }
+
   if (isEditMode && editEntryQuery.isLoading) {
     return (
       <div style={{ maxWidth: 560 }}>
@@ -356,6 +524,21 @@ export const LogSession = () => {
     )
   }
 
+  if (
+    isCorrectionMode &&
+    (correctionEventQuery.isLoading ||
+      correctionProgramQuery.isLoading ||
+      existingEntryQuery.isLoading ||
+      existingClaimQuery.isLoading)
+  ) {
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>Request a Correction</Typography.Title>
+        <Card loading />
+      </div>
+    )
+  }
+
   if (isEditMode && editEntry?.status === 'paid') {
     return (
       <div style={{ maxWidth: 560 }}>
@@ -369,6 +552,135 @@ export const LogSession = () => {
     )
   }
 
+  // The real self-service bypass this closes: switching Location to "Other"
+  // mid-edit used to let a coach unlink a session-linked entry from its
+  // event and substitute arbitrary hours with zero review. Blocking the
+  // whole interactive form for event-linked entries makes that switch
+  // unreachable, rather than only patching the fields that happen not to
+  // exist for this path today. "Request a correction" is the only way to
+  // change hours on an event-linked entry from here on.
+  if (isEditMode && editEntry && editEntry.event_id) {
+    const program = programs.find((p) => p.id === editEntry.program_id)
+    const location = editEntry.location_id ? locationsById.get(editEntry.location_id) : undefined
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>Edit Entry</Typography.Title>
+        <Card>
+          <Typography.Paragraph type="secondary">
+            This entry is linked to a scheduled event, so its date, program, location, and hours
+            can't be edited directly here. Use "Request a correction" if the scheduled hours are
+            wrong.
+          </Typography.Paragraph>
+          <p>
+            <strong>Date:</strong> {editEntry.entry_date}
+          </p>
+          <p>
+            <strong>Program:</strong> {program?.name ?? '—'}
+          </p>
+          <p>
+            <strong>Location:</strong> {location?.name ?? '—'}
+          </p>
+          <p>
+            <strong>Session:</strong> {editEntry.session_name ?? '—'}
+          </p>
+          <p>
+            <strong>Hours:</strong> {editEntry.hours != null ? editEntry.hours.toFixed(2) : '—'}
+          </p>
+          <Space>
+            <Link to={`/log-session/correct/${editEntry.event_id}`}>
+              <Button type="primary">Request a correction</Button>
+            </Link>
+            <Button onClick={() => navigate('/my-sessions')}>Back</Button>
+          </Space>
+        </Card>
+      </div>
+    )
+  }
+
+  if (isCorrectionMode) {
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>Request a Correction</Typography.Title>
+        <Card>
+          <Typography.Paragraph type="secondary">
+            {correctionEventResult?.event_date} — {correctionProgramResult?.name}
+            {correctionEventResult?.session_name ? ` — ${correctionEventResult.session_name}` : ''}. Scheduled
+            hours: {correctionScheduledHours != null ? correctionScheduledHours.toFixed(2) : 'unknown'}. Every
+            correction request is reviewed by an admin before it changes anything.
+          </Typography.Paragraph>
+          {existingClaim && (
+            <Alert
+              style={{ marginBottom: 16 }}
+              type="info"
+              showIcon
+              message="You already have a pending correction request for this session. Submitting will update it, not create a second one."
+            />
+          )}
+          <Form layout="vertical">
+            {isFixedHoursCorrection ? (
+              <Form.Item label="Proposed hours" required>
+                <InputNumber
+                  min={0}
+                  step={0.25}
+                  style={{ width: '100%' }}
+                  value={correctionHoursInput ?? undefined}
+                  onChange={(value) => setCorrectionHoursInput(value)}
+                />
+              </Form.Item>
+            ) : (
+              <>
+                <Form.Item label="Proposed start time" required>
+                  <TimePicker
+                    style={{ width: '100%' }}
+                    format="h:mm A"
+                    minuteStep={5}
+                    value={correctionStart}
+                    onChange={setCorrectionStart}
+                  />
+                </Form.Item>
+                <Form.Item label="Proposed end time" required>
+                  <TimePicker
+                    style={{ width: '100%' }}
+                    format="h:mm A"
+                    minuteStep={5}
+                    value={correctionEnd}
+                    onChange={setCorrectionEnd}
+                  />
+                </Form.Item>
+                {correctionRequestedHours != null && (
+                  <Form.Item label="Proposed hours">
+                    <Input readOnly value={`${correctionRequestedHours.toFixed(2)} hrs`} />
+                  </Form.Item>
+                )}
+              </>
+            )}
+            <Form.Item label="Reason" required>
+              <Input.TextArea
+                rows={3}
+                placeholder="Why are the scheduled hours wrong?"
+                value={correctionReason}
+                onChange={(e) => setCorrectionReason(e.target.value)}
+              />
+            </Form.Item>
+            <Space>
+              <Button
+                type="primary"
+                disabled={!canSubmitCorrection}
+                loading={correctionSubmitting}
+                onClick={handleSubmitCorrection}
+              >
+                Send for review
+              </Button>
+              <Button onClick={() => navigate('/my-sessions')}>Cancel</Button>
+            </Space>
+          </Form>
+        </Card>
+      </div>
+    )
+  }
+
+  const showSharedNotesAndSubmit = !isSessionMode || band === 'A'
+
   return (
     <div style={{ maxWidth: 560 }}>
       <Typography.Title level={3}>
@@ -377,7 +689,7 @@ export const LogSession = () => {
 
       <Card>
         <Form layout="vertical">
-          <Form.Item label="Date" required>
+          <Form.Item label={isSessionMode && band === 'C' ? 'Approximate date' : 'Date'} required>
             <DatePicker
               style={{ width: '100%' }}
               value={entryDate}
@@ -387,6 +699,7 @@ export const LogSession = () => {
                 setProgramId(null)
                 setLocationId(null)
                 setEventId(null)
+                setBandBReason('')
               }}
               allowClear={false}
             />
@@ -401,11 +714,14 @@ export const LogSession = () => {
                 setProgramId(value)
                 setLocationId(null)
                 setEventId(null)
+                setBandBReason('')
               }}
             />
           </Form.Item>
 
-          {isSessionMode && (
+          {isSessionMode && periodsQuery.isLoading && <Card loading style={{ marginBottom: 16 }} />}
+
+          {isSessionMode && !periodsQuery.isLoading && band === 'A' && (
             <>
               <Form.Item label="Location" required>
                 <Select
@@ -413,7 +729,7 @@ export const LogSession = () => {
                     locationOptions.length > 0 ? 'Select a location' : 'No scheduled sessions for this date/program'
                   }
                   value={locationId ?? undefined}
-                  options={[...locationOptions, { label: "Other (not on the calendar)", value: OTHER }]}
+                  options={[...locationOptions, { label: 'Other (not on the calendar)', value: OTHER }]}
                   onChange={(value) => {
                     setLocationId(value)
                     setEventId(null)
@@ -486,6 +802,67 @@ export const LogSession = () => {
             </>
           )}
 
+          {isSessionMode && !periodsQuery.isLoading && band === 'B' && (
+            <>
+              <Alert
+                style={{ marginBottom: 16 }}
+                type="info"
+                showIcon
+                message="This date is outside the current logging window. Submitting here sends it to an admin for review before it's payable."
+              />
+              <Form.Item label="Location" required>
+                <Select
+                  placeholder={
+                    locationOptions.length > 0 ? 'Select a location' : 'No scheduled sessions for this date/program'
+                  }
+                  value={locationId ?? undefined}
+                  options={locationOptions}
+                  onChange={(value) => {
+                    setLocationId(value)
+                    setEventId(null)
+                  }}
+                />
+              </Form.Item>
+              {locationId && (
+                <Form.Item label="Session / Team" required>
+                  <Select
+                    placeholder="Select a session"
+                    value={eventId ?? undefined}
+                    options={eventOptions}
+                    onChange={(value) => setEventId(value)}
+                  />
+                </Form.Item>
+              )}
+              <Form.Item label="Reason" required>
+                <Input.TextArea
+                  rows={3}
+                  placeholder="Why are you logging this late?"
+                  value={bandBReason}
+                  onChange={(e) => setBandBReason(e.target.value)}
+                />
+              </Form.Item>
+              <Space>
+                <Button
+                  type="primary"
+                  disabled={!canSubmitBandB}
+                  loading={bandBSubmitting}
+                  onClick={handleBandBSubmit}
+                >
+                  Send for review
+                </Button>
+              </Space>
+            </>
+          )}
+
+          {isSessionMode && !periodsQuery.isLoading && band === 'C' && coachId && (
+            <BandCUnstructuredClaimForm
+              coachId={coachId}
+              programId={programId!}
+              date={entryDate}
+              onSubmitted={resetForm}
+            />
+          )}
+
           {isDirectTime && (
             <>
               <Form.Item label="Start time" required>
@@ -545,7 +922,7 @@ export const LogSession = () => {
             </Form.Item>
           )}
 
-          {programId && (
+          {programId && showSharedNotesAndSubmit && (
             <Form.Item label="Notes" required={isDirectFlat || isReimbursement}>
               <Input.TextArea
                 rows={3}
@@ -562,14 +939,16 @@ export const LogSession = () => {
             </Form.Item>
           )}
 
-          <Space>
-            <Button type="primary" disabled={!canSubmit} loading={submitting} onClick={handleSubmit}>
-              {isEditMode ? 'Save changes' : isConfirmMode ? 'Confirm' : 'Submit'}
-            </Button>
-            {(isEditMode || isConfirmMode) && (
-              <Button onClick={() => navigate('/my-sessions')}>Cancel</Button>
-            )}
-          </Space>
+          {showSharedNotesAndSubmit && (
+            <Space>
+              <Button type="primary" disabled={!canSubmit} loading={submitting} onClick={handleSubmit}>
+                {isEditMode ? 'Save changes' : isConfirmMode ? 'Confirm' : 'Submit'}
+              </Button>
+              {(isEditMode || isConfirmMode) && (
+                <Button onClick={() => navigate('/my-sessions')}>Cancel</Button>
+              )}
+            </Space>
+          )}
         </Form>
       </Card>
     </div>

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useGetIdentity, useList } from '@refinedev/core'
-import { App, Button, Card, Segmented, Space, Table, Tag, Typography } from 'antd'
+import { App, Button, Card, InputNumber, Modal, Segmented, Select, Space, Table, Tag, Typography } from 'antd'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
+import { resolveEventHours } from '../../utils/hours'
 
 type EventRef = {
   id: string
@@ -54,6 +55,33 @@ type SwapRequestRow = {
   } | null
 }
 
+type PaymentClaimAdminRow = {
+  id: string
+  coach_id: string
+  claim_type: 'late_event' | 'unassigned_claim' | 'unstructured' | 'hours_correction'
+  event_id: string | null
+  entry_id: string | null
+  program_id: string
+  location_id: string
+  approx_date: string | null
+  scheduled_hours: number | null
+  requested_hours: number | null
+  reason: string | null
+  notes: string | null
+  status: 'pending' | 'approved' | 'denied'
+  requested_at: string
+  events: { event_date: string; session_name: string | null; start_time: string | null; end_time: string | null } | null
+  programs: { name: string } | null
+  locations: { name: string; half_day_hours: number | null; full_day_hours: number | null } | null
+}
+
+const CLAIM_TYPE_LABELS: Record<PaymentClaimAdminRow['claim_type'], string> = {
+  late_event: 'Late request',
+  unassigned_claim: 'Unassigned claim',
+  unstructured: 'Unverified claim',
+  hours_correction: 'Hours correction',
+}
+
 type ReconciliationStatus =
   | 'match'
   | 'not_assigned'
@@ -101,6 +129,11 @@ export const Reconciliation = () => {
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [decidingSwapId, setDecidingSwapId] = useState<string | null>(null)
+  const [decidingClaimId, setDecidingClaimId] = useState<string | null>(null)
+  const [claimTypeFilter, setClaimTypeFilter] = useState<'all' | PaymentClaimAdminRow['claim_type']>('all')
+  const [unstructuredModalClaim, setUnstructuredModalClaim] = useState<PaymentClaimAdminRow | null>(null)
+  const [unstructuredHoursInput, setUnstructuredHoursInput] = useState<number | null>(null)
+  const [approvingUnstructured, setApprovingUnstructured] = useState(false)
 
   const filters = useMemo(
     () => (paymentFilter === 'all' ? [] : [{ field: 'status', operator: 'eq' as const, value: paymentFilter }]),
@@ -149,6 +182,22 @@ export const Reconciliation = () => {
     pagination: { pageSize: 200 },
   })
   const swapRequests = swapRequestsResult?.data ?? []
+
+  const { result: claimsResult, query: claimsQuery } = useList<PaymentClaimAdminRow>({
+    resource: 'payment_claims',
+    meta: {
+      select:
+        '*, events(event_date, session_name, start_time, end_time), programs(name), locations(name, half_day_hours, full_day_hours)',
+    },
+    filters: [{ field: 'status', operator: 'eq', value: 'pending' }],
+    sorters: [{ field: 'requested_at', order: 'asc' }],
+    pagination: { pageSize: 200 },
+  })
+  const claims = claimsResult?.data ?? []
+  const visibleClaims = useMemo(
+    () => (claimTypeFilter === 'all' ? claims : claims.filter((c) => c.claim_type === claimTypeFilter)),
+    [claims, claimTypeFilter],
+  )
 
   const ratesByCoachId = useMemo(
     () => new Map((ratesResult?.data ?? []).map((r) => [r.coach_id, r])),
@@ -252,6 +301,121 @@ export const Reconciliation = () => {
       swapRequestsQuery.refetch()
     } finally {
       setDecidingSwapId(null)
+    }
+  }
+
+  // Approve/deny for late_event, unassigned_claim, and hours_correction --
+  // all three have enough information on the claim itself (plus its joined
+  // event) to resolve hours automatically. 'unstructured' is handled
+  // separately (see handleApproveUnstructured) since there's no event to
+  // derive hours from -- the admin has to enter them by hand, same as
+  // admin_only entries today.
+  const decideClaim = async (claim: PaymentClaimAdminRow, decision: 'approved' | 'denied') => {
+    setDecidingClaimId(claim.id)
+    try {
+      if (decision === 'approved') {
+        if (claim.claim_type === 'late_event' || claim.claim_type === 'unassigned_claim') {
+          if (!claim.events) {
+            message.error("Couldn't find the linked event.")
+            return
+          }
+          const hours = resolveEventHours(claim.programs?.name ?? '', claim.events, claim.locations ?? undefined)
+          const { error: insertError } = await supabaseClient.from('timesheet_entries').insert({
+            coach_id: claim.coach_id,
+            program_id: claim.program_id,
+            event_id: claim.event_id,
+            location_id: claim.location_id,
+            entry_date: claim.events.event_date,
+            start_time: claim.events.start_time,
+            end_time: claim.events.end_time,
+            hours,
+            session_name: claim.events.session_name,
+            status: 'pending',
+          })
+          if (insertError) {
+            message.error(`Couldn't create the entry: ${insertError.message}`)
+            return
+          }
+        } else if (claim.claim_type === 'hours_correction') {
+          if (claim.entry_id) {
+            const { error: updateError } = await supabaseClient
+              .from('timesheet_entries')
+              .update({ hours: claim.requested_hours })
+              .eq('id', claim.entry_id)
+            if (updateError) {
+              message.error(`Couldn't update the entry: ${updateError.message}`)
+              return
+            }
+          } else {
+            const { error: insertError } = await supabaseClient.from('timesheet_entries').insert({
+              coach_id: claim.coach_id,
+              program_id: claim.program_id,
+              event_id: claim.event_id,
+              location_id: claim.location_id,
+              entry_date: claim.events?.event_date,
+              start_time: claim.events?.start_time ?? null,
+              end_time: claim.events?.end_time ?? null,
+              hours: claim.requested_hours,
+              session_name: claim.events?.session_name ?? null,
+              status: 'pending',
+            })
+            if (insertError) {
+              message.error(`Couldn't create the entry: ${insertError.message}`)
+              return
+            }
+          }
+        }
+      }
+
+      const { error } = await supabaseClient
+        .from('payment_claims')
+        .update({ status: decision, reviewed_by: identity?.id ?? null, reviewed_at: new Date().toISOString() })
+        .eq('id', claim.id)
+      if (error) {
+        message.error(`Couldn't save the decision: ${error.message}`)
+        return
+      }
+      message.success(decision === 'approved' ? 'Claim approved' : 'Claim denied')
+      claimsQuery.refetch()
+    } finally {
+      setDecidingClaimId(null)
+    }
+  }
+
+  const handleApproveUnstructured = async () => {
+    if (!unstructuredModalClaim || unstructuredHoursInput == null) return
+    setApprovingUnstructured(true)
+    try {
+      const claim = unstructuredModalClaim
+      const { error: insertError } = await supabaseClient.from('timesheet_entries').insert({
+        coach_id: claim.coach_id,
+        program_id: claim.program_id,
+        event_id: null,
+        location_id: claim.location_id,
+        entry_date: claim.approx_date,
+        hours: unstructuredHoursInput,
+        session_name: claim.reason,
+        notes: claim.notes,
+        status: 'pending',
+      })
+      if (insertError) {
+        message.error(`Couldn't create the entry: ${insertError.message}`)
+        return
+      }
+      const { error } = await supabaseClient
+        .from('payment_claims')
+        .update({ status: 'approved', reviewed_by: identity?.id ?? null, reviewed_at: new Date().toISOString() })
+        .eq('id', claim.id)
+      if (error) {
+        message.error(`Couldn't save the decision: ${error.message}`)
+        return
+      }
+      message.success('Claim approved')
+      setUnstructuredModalClaim(null)
+      setUnstructuredHoursInput(null)
+      claimsQuery.refetch()
+    } finally {
+      setApprovingUnstructured(false)
     }
   }
 
@@ -367,6 +531,76 @@ export const Reconciliation = () => {
         </Card>
       )}
 
+      {claims.length > 0 && (
+        <Card
+          title={`Payment claims (${claims.length})`}
+          style={{ marginBottom: 16 }}
+          size="small"
+          loading={claimsQuery.isLoading}
+          extra={
+            <Select
+              size="small"
+              style={{ width: 180 }}
+              value={claimTypeFilter}
+              onChange={(value) => setClaimTypeFilter(value)}
+              options={[
+                { label: 'All types', value: 'all' },
+                { label: 'Late request', value: 'late_event' },
+                { label: 'Unassigned claim', value: 'unassigned_claim' },
+                { label: 'Unverified claim', value: 'unstructured' },
+                { label: 'Hours correction', value: 'hours_correction' },
+              ]}
+            />
+          }
+        >
+          <Table dataSource={visibleClaims} rowKey="id" pagination={false} size="small">
+            <Table.Column
+              title="Date"
+              width={110}
+              render={(_, row: PaymentClaimAdminRow) => row.events?.event_date ?? row.approx_date ?? '—'}
+            />
+            <Table.Column
+              title="Coach"
+              render={(_, row: PaymentClaimAdminRow) => coachesById.get(row.coach_id)?.name ?? '—'}
+            />
+            <Table.Column title="Type" render={(_, row: PaymentClaimAdminRow) => CLAIM_TYPE_LABELS[row.claim_type]} />
+            <Table.Column title="Program" render={(_, row: PaymentClaimAdminRow) => row.programs?.name ?? '—'} />
+            <Table.Column title="Location" render={(_, row: PaymentClaimAdminRow) => row.locations?.name ?? '—'} />
+            <Table.Column title="Reason" render={(_, row: PaymentClaimAdminRow) => row.reason || '—'} />
+            <Table.Column
+              title="Hours"
+              render={(_, row: PaymentClaimAdminRow) =>
+                row.claim_type === 'hours_correction'
+                  ? `${row.scheduled_hours?.toFixed(2) ?? '—'} → ${row.requested_hours?.toFixed(2) ?? '—'}`
+                  : '—'
+              }
+            />
+            <Table.Column
+              title="Actions"
+              render={(_, row: PaymentClaimAdminRow) => (
+                <Space>
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={decidingClaimId === row.id}
+                    onClick={() =>
+                      row.claim_type === 'unstructured'
+                        ? setUnstructuredModalClaim(row)
+                        : decideClaim(row, 'approved')
+                    }
+                  >
+                    Approve
+                  </Button>
+                  <Button size="small" loading={decidingClaimId === row.id} onClick={() => decideClaim(row, 'denied')}>
+                    Deny
+                  </Button>
+                </Space>
+              )}
+            />
+          </Table>
+        </Card>
+      )}
+
       <Space style={{ marginBottom: 16 }} wrap>
         <Segmented
           value={paymentFilter}
@@ -413,6 +647,30 @@ export const Reconciliation = () => {
           />
         </Table>
       </Card>
+
+      <Modal
+        title="Approve unverified claim"
+        open={!!unstructuredModalClaim}
+        onCancel={() => {
+          setUnstructuredModalClaim(null)
+          setUnstructuredHoursInput(null)
+        }}
+        onOk={handleApproveUnstructured}
+        okText="Approve"
+        okButtonProps={{ disabled: unstructuredHoursInput == null, loading: approvingUnstructured }}
+      >
+        <Typography.Paragraph type="secondary">
+          There's no calendar event to derive hours from -- enter the hours to pay for this claim.
+        </Typography.Paragraph>
+        <InputNumber
+          min={0}
+          step={0.25}
+          style={{ width: '100%' }}
+          placeholder="Hours"
+          value={unstructuredHoursInput ?? undefined}
+          onChange={(value) => setUnstructuredHoursInput(value)}
+        />
+      </Modal>
     </div>
   )
 }
