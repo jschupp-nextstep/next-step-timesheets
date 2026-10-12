@@ -16,6 +16,7 @@ export const CoachEdit = () => {
         <Form.Item
           label="Email"
           name="email"
+          normalize={(value?: string) => (value ? value.trim().toLowerCase() : null)}
           rules={[{ type: 'email' }]}
           extra="Lets this coach log in. Type their email here, then use Supabase's Invite user action for the same address."
         >

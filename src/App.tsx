@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
-import { Authenticated, Refine, useGetIdentity } from '@refinedev/core'
+import { Authenticated, Refine, useGetIdentity, useLogout } from '@refinedev/core'
 import { ErrorComponent, ThemedLayout, useNotificationProvider } from '@refinedev/antd'
 import { dataProvider } from '@refinedev/supabase'
 import routerBindings, { DocumentTitleHandler, NavigateToResource } from '@refinedev/react-router'
@@ -56,6 +56,12 @@ const ScheduleBoard = lazy(() =>
 const EntryList = lazy(() => import('./pages/entries/list').then((m) => ({ default: m.EntryList })))
 const EntryCreate = lazy(() => import('./pages/entries/create').then((m) => ({ default: m.EntryCreate })))
 const EntryEdit = lazy(() => import('./pages/entries/edit').then((m) => ({ default: m.EntryEdit })))
+const SchedulerList = lazy(() => import('./pages/schedulers/list').then((m) => ({ default: m.SchedulerList })))
+const SchedulerCreate = lazy(() =>
+  import('./pages/schedulers/create').then((m) => ({ default: m.SchedulerCreate })),
+)
+const SchedulerEdit = lazy(() => import('./pages/schedulers/edit').then((m) => ({ default: m.SchedulerEdit })))
+const Schedule = lazy(() => import('./pages/scheduler/schedule').then((m) => ({ default: m.Schedule })))
 const Settings = lazy(() => import('./pages/settings').then((m) => ({ default: m.Settings })))
 
 const SprocketImport = lazy(() =>
@@ -159,6 +165,11 @@ const AdminRoutes = () => (
       <Route path="/reconciliation" element={<Reconciliation />} />
       <Route path="/payment-due" element={<PaymentDue />} />
       <Route path="/zoho-export" element={<ZohoExport />} />
+      <Route path="/schedulers">
+        <Route index element={<SchedulerList />} />
+        <Route path="create" element={<SchedulerCreate />} />
+        <Route path="edit/:id" element={<SchedulerEdit />} />
+      </Route>
       <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
@@ -179,6 +190,44 @@ const CoachRoutes = () => (
     </Routes>
   </CoachLayout>
 )
+
+// Schedulers share the coach layout; one who also coaches (coachId set)
+// gets the coach screens too. Nothing admin-side is routed here at all.
+const SchedulerRoutes = ({ isCoach }: { isCoach: boolean }) => (
+  <CoachLayout>
+    <Routes>
+      <Route index element={<Navigate to="/schedule" replace />} />
+      <Route path="/schedule" element={<Schedule />} />
+      {isCoach && (
+        <>
+          <Route path="/log-session" element={<LogSession />} />
+          <Route path="/log-session/edit/:id" element={<LogSession />} />
+          <Route path="/log-session/confirm/:eventId" element={<LogSession />} />
+          <Route path="/log-session/correct/:correctEventId" element={<LogSession />} />
+          <Route path="/my-sessions" element={<MySessions />} />
+          <Route path="/my-sessions/unassigned-claim" element={<UnassignedClaim />} />
+        </>
+      )}
+      <Route path="*" element={<ErrorComponent />} />
+    </Routes>
+  </CoachLayout>
+)
+
+// Signed in, but not an admin, scheduler, or coach on the roster.
+const NoAccess = ({ email }: { email: string }) => {
+  const { mutate: logout } = useLogout()
+  return (
+    <div style={{ maxWidth: 480, margin: '96px auto', padding: 16 }}>
+      <Alert
+        type="warning"
+        showIcon
+        message="This account doesn't have access yet"
+        description={`${email} isn't set up as a coach, scheduler, or admin. Ask Next Step to add you, then sign in again.`}
+        action={<Button onClick={() => logout()}>Log out</Button>}
+      />
+    </div>
+  )
+}
 
 // Supabase's JWT records how the *current* session was actually established
 // (amr = authentication method reference) -- password, otp (magic link and
@@ -231,7 +280,16 @@ const AuthenticatedShell = () => {
     return <UpdatePassword onSkip={dismissPasswordPrompt} onSuccess={dismissPasswordPrompt} />
   }
 
-  return identity?.role === 'coach' ? <CoachRoutes /> : <AdminRoutes />
+  switch (identity?.role) {
+    case 'admin':
+      return <AdminRoutes />
+    case 'scheduler':
+      return <SchedulerRoutes isCoach={!!identity.coachId} />
+    case 'coach':
+      return <CoachRoutes />
+    default:
+      return <NoAccess email={identity?.email ?? ''} />
+  }
 }
 
 function App() {
@@ -332,6 +390,13 @@ function App() {
                   name: 'zoho-export',
                   list: '/zoho-export',
                   meta: { label: 'Zoho Export' },
+                },
+                {
+                  name: 'schedulers',
+                  list: '/schedulers',
+                  create: '/schedulers/create',
+                  edit: '/schedulers/edit/:id',
+                  meta: { label: 'Schedulers' },
                 },
                 {
                   name: 'app_settings',

@@ -2,9 +2,15 @@ import type { AuthProvider } from '@refinedev/core'
 
 import { supabaseClient } from '../utility/supabaseClient'
 
+// A person can be both a scheduler and a coach (same email in both tables);
+// coachId is set on a scheduler identity in that case so the scheduler
+// layout can offer the coach screens too.
 export type Identity =
   | { role: 'admin'; id: string; email: string }
+  | { role: 'scheduler'; id: string; email: string; schedulerId: string; name: string; coachId?: string }
   | { role: 'coach'; id: string; email: string; coachId: string; name: string }
+  // Signed in, but on no roster -- since 0017, no longer silently an admin.
+  | { role: 'none'; id: string; email: string }
 
 // Deliberately no `#/update-password` here. This app uses HashRouter, and
 // Supabase delivers magic-link/recovery tokens as their own URL fragment
@@ -80,15 +86,33 @@ export const authProvider: AuthProvider = {
   getIdentity: async (): Promise<Identity | null> => {
     const { data } = await supabaseClient.auth.getUser()
     if (!data.user) return null
-    const email = data.user.email ?? ''
-    const { data: coach } = await supabaseClient
-      .from('coaches')
-      .select('id, name')
-      .eq('email', email)
-      .maybeSingle()
+    const email = (data.user.email ?? '').toLowerCase()
+    // Roles come from the database's own checks (admins allowlist,
+    // schedulers, coaches.email) so the UI can never disagree with RLS.
+    const [{ data: isAdmin }, { data: scheduler }, { data: coach }] = await Promise.all([
+      supabaseClient.rpc('is_admin'),
+      supabaseClient.from('schedulers').select('id, name').eq('email', email).eq('is_active', true).maybeSingle(),
+      supabaseClient.from('coaches').select('id, name').eq('email', email).maybeSingle(),
+    ])
+    if (isAdmin) return { role: 'admin', id: data.user.id, email }
+    if (scheduler) {
+      return {
+        role: 'scheduler',
+        id: data.user.id,
+        email,
+        schedulerId: scheduler.id,
+        name: scheduler.name,
+        coachId: coach?.id,
+      }
+    }
     if (coach) {
       return { role: 'coach', id: data.user.id, email, coachId: coach.id, name: coach.name }
     }
-    return { role: 'admin', id: data.user.id, email }
+    return { role: 'none', id: data.user.id, email }
   },
 }
+
+// The coach record behind this login, if any -- a coach, or a scheduler
+// who also coaches. Coach-facing pages use this instead of checking role.
+export const coachIdOf = (identity: Identity | undefined): string | undefined =>
+  identity?.role === 'coach' || identity?.role === 'scheduler' ? identity.coachId : undefined

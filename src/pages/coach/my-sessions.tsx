@@ -5,7 +5,7 @@ import { Link } from 'react-router'
 import dayjs from 'dayjs'
 
 import { supabaseClient } from '../../utility/supabaseClient'
-import type { Identity } from '../../providers/authProvider'
+import { coachIdOf, type Identity } from '../../providers/authProvider'
 import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
 
 type EventAssignmentRow = {
@@ -118,7 +118,7 @@ const ASSIGNMENT_LOOKAHEAD_DAYS = 30
 export const MySessions = () => {
   const { message } = App.useApp()
   const { data: identity } = useGetIdentity<Identity>()
-  const coachId = identity?.role === 'coach' ? identity.coachId : undefined
+  const coachId = coachIdOf(identity)
   const [tab, setTab] = useState<'current' | 'paid'>('current')
   const { mutate: deleteEntry } = useDelete()
   const { mutate: updateAssignment } = useUpdate()

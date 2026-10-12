@@ -185,7 +185,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2–R9 not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2a (roles) done 2026-10-12; R2b–R2d and R3–R9 not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -209,7 +209,7 @@ hours. Justin has full summer runway, not a tight 2–3 week window.
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0015`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0017`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -250,6 +250,20 @@ GCP project creation) — that machinery was a workaround specific to the spread
 with no equivalent need here.
 
 ---
+
+### Before coach rollout (to-do)
+
+Found 2026-10-12: only 1 of 61 active coaches (TEST COACH) has an email on the roster, so
+coaches aren't actually logging in yet — the app's real use so far is admin-side.
+
+- [ ] **Custom SMTP for Supabase Auth email** (e.g. Resend). The built-in sender is capped at
+  ~2–4 emails/hour; 60 coaches requesting magic links on launch day would hit it.
+- [ ] **Collect coach emails** (Name,Email CSV) and run `scripts/provision-coach-logins.mjs` —
+  dry run by default, `--apply` to write. Sets `coaches.email` (lowercased, name-matched exactly,
+  unmatched names listed never guessed) and creates pre-confirmed Auth users with no email sent.
+  Needs `SUPABASE_SERVICE_ROLE_KEY` as an env var for that run only — never in `.env.local`.
+- "Allow new users to sign up" is **off** in Supabase Auth (turned off 2026-10-12), so every login
+  must be created deliberately: the script above, or Authentication → Users → Add user.
 
 ## Phase 5 continued — scheduling & coach confirmation (✅ done, deployed 2026-09-26)
 
@@ -645,3 +659,62 @@ tomorrow were rejected by RLS, 10/8 accepted with `admin_entered = false`; forgi
 admin, a 9/15 admin-entered entry appeared in Payment Due only when the range included it; "Mark
 all paid" over 10/7–10/10 paid only the 10/8 entry, left 9/15 pending, and advanced paid-through
 to 10/10 (then reset to 10/6 and test rows deleted).
+
+### R2 — on-the-fly schedule changes (plan agreed 2026-10-12)
+
+Four stages, each verified before the next: **R2a** roles, **R2b** logged quick actions,
+**R2c** review queue + payroll hold, **R2d** swap-with-replacement + Sprocket source tagging.
+
+Decisions made with Justin:
+- **Scheduler scope** = two kinds of rule, either matching is enough: *program and/or location*
+  (e.g. Town Session at each Natick location — one row per location; a town/area grouping was
+  considered and deferred until location lists get long), and *coach* (manages any event that
+  coach is assigned to, anywhere). Not a coach *pool* restricting who they can assign.
+- **Schedulers can create events**, but only via a program/location rule, not a coach rule.
+- **Sprocket re-import policy changed** from the earlier "Sprocket wins, straight overwrite" (in
+  "Where things stand right now" above): **Sprocket wins only for Sprocket-sourced
+  assignments**; manual/bulk ones are kept and conflicts listed for Justin. Recorded now, built
+  with the (still template-blocked) importer upgrade. Note the importer today skips existing
+  events entirely, so it can't erase a manual sub yet — its real current gap is duplicating an
+  event whose time changed in Sprocket.
+- **"Scheduler changes wait for approval" switch deferred**; R2b change rows will store enough to
+  apply later if it's ever wanted.
+- History will live in an append-only `schedule_changes` table, with `event_assignments` staying
+  current-state only — so the 6+ existing readers (My Sessions, Band A picker, Reconciliation,
+  board, claims) don't each need a "skip removed rows" filter. All writes go through
+  security-definer functions so a change can't happen without its log row.
+
+**R2a done (2026-10-12, `0017_roles.sql`):**
+- **Admin is now an allowlist** (`admins`, seeded `jschupp@next-step-training.com`). Before this,
+  `is_admin()` was "signed in and not on the coach roster" — combined with magic-link sign-ups
+  being enabled, any stranger could self-register as a full admin. Sign-ups were also turned off
+  in Supabase Auth the same day. Add an admin: `insert into admins (email) values ('…')`
+  (lowercase enforced by a check constraint).
+- `schedulers` + `scheduler_scopes` (check constraint: a row is either program/location or
+  coach), `current_scheduler_id()`, `is_scheduler_for_event(event_id)`,
+  `is_scheduler_for_program_location()` (for R2b's create), and an `in_my_scope` computed column
+  on `events` so the UI filters with the same check RLS uses. Schedulers get **read-only**
+  in-scope `event_assignments`; no write access to anything until R2b.
+- `getIdentity` now resolves roles from the DB (`rpc('is_admin')`, schedulers, coaches) — admin >
+  scheduler > coach > `none`. A scheduler who is also a coach (same email in both tables) gets
+  the coach screens too (`coachIdOf()` in authProvider). A login on no roster gets a "no access"
+  screen instead of the admin UI. Schedulers get a phone-first `/schedule` day list (read-only);
+  admins get `/schedulers` with a scope-rule editor.
+- Coach emails entered on the Coaches screens are now lowercased on save — Auth stores login
+  emails lowercase and `current_coach_id()` matches exactly, so a capitalized roster email could
+  never log in.
+- Added locations Natick - Bennett-Hemenway and Natick - Sargent 9v9 (Justin's request).
+- Verified live as a test scheduler (`schupp.14+scheduler@gmail.com`, scoped to Town Session at
+  the 5 Natick locations): routed to `/schedule` with no admin/coach screens; saw a Natick test
+  event and its assignment, not an AP one (its event row is readable — events always were — but
+  not who's on it); 0 rows readable from rates, 1v1 rates, entries, claims, swaps, admins,
+  oversight; updates to events/assignments/settings/rates matched 0 rows, and inserts into
+  events, assignments, admins, own scopes, and entries were refused by RLS. Adding a TEST COACH
+  coach rule (via SQL) brought the AP test event into scope. **Test scheduler, its Natick rules,
+  and two "R2A TEST" events are intentionally left in place for R2b testing — delete at the end
+  of R2.**
+- Gotcha: a magic link lands on the deployed site (Supabase's redirect), not localhost — testing
+  undeployed UI as another role means carrying that session over to the dev server.
+- Go-live (separate step, per Justin): locations, fall events via bulk import, coach logins,
+  SMTP — and **reset the cutover date to the go-live date, with Paid through set to the day
+  before**, in Settings.

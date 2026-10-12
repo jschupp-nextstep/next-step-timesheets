@@ -3,7 +3,7 @@ import { Card, Typography } from 'antd'
 import { useNavigate } from 'react-router'
 import dayjs from 'dayjs'
 
-import type { Identity } from '../../providers/authProvider'
+import { coachIdOf, type Identity } from '../../providers/authProvider'
 import { computeBands, type PayPeriod } from '../../utils/payPeriods'
 import { useAppSettings } from '../../utility/appSettings'
 import { EventClaimForm } from './EventClaimForm'
@@ -15,7 +15,7 @@ import { EventClaimForm } from './EventClaimForm'
 export const UnassignedClaim = () => {
   const navigate = useNavigate()
   const { data: identity } = useGetIdentity<Identity>()
-  const coachId = identity?.role === 'coach' ? identity.coachId : undefined
+  const coachId = coachIdOf(identity)
 
   const { result: periodsResult, query: periodsQuery } = useList<PayPeriod>({
     resource: 'pay_periods',

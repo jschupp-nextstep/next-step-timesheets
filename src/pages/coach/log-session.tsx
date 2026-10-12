@@ -5,7 +5,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { Link, useNavigate, useParams } from 'react-router'
 
 import { supabaseClient } from '../../utility/supabaseClient'
-import type { Identity } from '../../providers/authProvider'
+import { coachIdOf, type Identity } from '../../providers/authProvider'
 import { FIXED_HOURS_HALF, FIXED_HOURS_FULL, timeSpanHours, resolveEventHours } from '../../utils/hours'
 import { computeBands, classifyDate, type PayPeriod } from '../../utils/payPeriods'
 import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
@@ -52,7 +52,7 @@ const DIRECT_FLAT_DURATIONS = [
 export const LogSession = () => {
   const { message } = App.useApp()
   const { data: identity } = useGetIdentity<Identity>()
-  const coachId = identity?.role === 'coach' ? identity.coachId : undefined
+  const coachId = coachIdOf(identity)
   const navigate = useNavigate()
   const { id: editId, eventId: confirmEventId, correctEventId } = useParams()
   const isEditMode = !!editId
