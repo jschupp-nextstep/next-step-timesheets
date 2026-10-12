@@ -5,6 +5,7 @@ import { App, Button, Card, InputNumber, Modal, Segmented, Select, Space, Table,
 import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
 import { resolveEventHours } from '../../utils/hours'
+import { useScheduleAction } from '../../utility/scheduleActions'
 
 type EventRef = {
   id: string
@@ -125,6 +126,7 @@ function computeStatus(entry: EntryRow): ReconciliationStatus {
 export const Reconciliation = () => {
   const { message } = App.useApp()
   const { data: identity } = useGetIdentity<Identity>()
+  const { run: runSchedule } = useScheduleAction()
   const [paymentFilter, setPaymentFilter] = useState<'pending' | 'paid' | 'all'>('pending')
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [decidingId, setDecidingId] = useState<string | null>(null)
@@ -278,15 +280,18 @@ export const Reconciliation = () => {
     setDecidingSwapId(request.id)
     try {
       if (decision === 'approved') {
-        const { error: deleteError } = await supabaseClient
-          .from('event_assignments')
-          .delete()
-          .eq('event_id', request.event_id)
-          .eq('coach_id', request.coach_id)
-        if (deleteError) {
-          message.error(`Couldn't remove the assignment: ${deleteError.message}`)
-          return
-        }
+        // Through the logged function, so the removal shows in the event's
+        // history. Its error (if any) is shown by useScheduleAction.
+        const removed = await runSchedule(
+          'schedule_remove',
+          {
+            p_event_id: request.event_id,
+            p_coach_id: request.coach_id,
+            p_reason: `Swap request approved${request.reason ? `: ${request.reason}` : ''}`,
+          },
+          null,
+        )
+        if (!removed) return
       }
 
       const { error } = await supabaseClient

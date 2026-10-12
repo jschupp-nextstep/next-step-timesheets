@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { App, Button, Card, Empty, Popover, Select, Space, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Input, Popover, Select, Space, Tag, Typography } from 'antd'
 import { LeftOutlined, RightOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 
-import { supabaseClient } from '../../utility/supabaseClient'
+import { Link } from 'react-router'
+
+import { useScheduleAction } from '../../utility/scheduleActions'
 
 type Assignment = {
   id: string
@@ -50,11 +52,12 @@ const coachLabel = (name: string) => {
 }
 
 export const ScheduleBoard = () => {
-  const { message } = App.useApp()
+  const { run } = useScheduleAction()
   const [weekStart, setWeekStart] = useState(() => mondayOf(dayjs()))
   const [activeEventId, setActiveEventId] = useState<string | null>(null)
   const [draftCoachIds, setDraftCoachIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [reason, setReason] = useState('')
 
   const weekEnd = weekStart.add(DAY_COUNT - 1, 'day')
   const days = useMemo(
@@ -66,7 +69,7 @@ export const ScheduleBoard = () => {
     resource: 'events',
     meta: {
       select:
-        '*, programs(name), locations(name), event_assignments(id, coach_id, coaches(name))',
+        '*, programs(name), locations(name), event_assignments(id, coach_id, coaches!event_assignments_coach_id_fkey(name))',
     },
     filters: [
       { field: 'event_date', operator: 'gte', value: weekStart.format('YYYY-MM-DD') },
@@ -100,6 +103,7 @@ export const ScheduleBoard = () => {
   const openPicker = (event: EventRow) => {
     setActiveEventId(event.id)
     setDraftCoachIds(event.event_assignments.map((a) => a.coach_id))
+    setReason('')
   }
 
   const closePicker = () => {
@@ -107,36 +111,30 @@ export const ScheduleBoard = () => {
     setDraftCoachIds([])
   }
 
+  // Adds/removes go through the logged schedule_* functions (one call per
+  // coach), so board edits land in the event's history like any other
+  // change. For a sub (with "covering for"), time changes, or cancelling,
+  // use "Open event".
   const savePicker = async (event: EventRow) => {
     setSaving(true)
     try {
       const currentIds = event.event_assignments.map((a) => a.coach_id)
-      const toRemove = event.event_assignments.filter((a) => !draftCoachIds.includes(a.coach_id))
-      const toAddIds = draftCoachIds.filter((id) => !currentIds.includes(id))
+      const toRemove = currentIds.filter((id) => !draftCoachIds.includes(id))
+      const toAdd = draftCoachIds.filter((id) => !currentIds.includes(id))
+      const nameOf = (id: string) => coaches.find((c) => c.id === id)?.name ?? 'Coach'
 
-      if (toRemove.length > 0) {
-        const { error } = await supabaseClient
-          .from('event_assignments')
-          .delete()
-          .in('id', toRemove.map((a) => a.id))
-        if (error) {
-          message.error(`Couldn't remove coach(es): ${error.message}`)
-          return
-        }
+      let allOk = true
+      for (const coachId of toRemove) {
+        allOk =
+          (await run('schedule_remove', { p_event_id: event.id, p_coach_id: coachId, p_reason: reason }, `Removed ${nameOf(coachId)}`)) &&
+          allOk
       }
-
-      if (toAddIds.length > 0) {
-        const { error } = await supabaseClient
-          .from('event_assignments')
-          .insert(toAddIds.map((coach_id) => ({ event_id: event.id, coach_id })))
-        if (error) {
-          message.error(`Couldn't add coach(es): ${error.message}`)
-          return
-        }
+      for (const coachId of toAdd) {
+        allOk =
+          (await run('schedule_add', { p_event_id: event.id, p_coach_id: coachId, p_reason: reason }, `Added ${nameOf(coachId)}`)) &&
+          allOk
       }
-
-      message.success('Assignments updated')
-      closePicker()
+      if (allOk) closePicker()
       query.refetch()
     } finally {
       setSaving(false)
@@ -166,13 +164,28 @@ export const ScheduleBoard = () => {
               onChange={(value) => setDraftCoachIds(value)}
               optionFilterProp="label"
             />
-            <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+            <Input.TextArea
+              rows={2}
+              placeholder="Reason (required), e.g. Keith out sick"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+              <Link to={`/schedule-board/event/${event.id}`}>Open event →</Link>
+              <Space>
               <Button size="small" onClick={closePicker}>
                 Cancel
               </Button>
-              <Button size="small" type="primary" loading={saving} onClick={() => savePicker(event)}>
+              <Button
+                size="small"
+                type="primary"
+                loading={saving}
+                disabled={!reason.trim()}
+                onClick={() => savePicker(event)}
+              >
                 Save
               </Button>
+              </Space>
             </Space>
           </Space>
         }

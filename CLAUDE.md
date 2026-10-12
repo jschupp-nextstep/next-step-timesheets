@@ -185,7 +185,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2a (roles) done 2026-10-12; R2b–R2d and R3–R9 not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2a (roles) + R2b (logged quick actions) done 2026-10-12; R2c–R2d and R3–R9 not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -209,7 +209,7 @@ hours. Justin has full summer runway, not a tight 2–3 week window.
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0019`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0021`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -750,3 +750,54 @@ grants (no drift from the migration files was found).
 - **Open question for Justin:** `current_coach_id()` ignores `coaches.is_active`, so a
   deactivated coach can still sign in and log sessions. One-line fix, but should a deactivated
   coach still see their paid history?
+
+**R2b done (2026-10-12, `0020_schedule_changes.sql`, `0021_create_event_check_order.sql`):**
+- `schedule_changes`: append-only history (create/sub/add/remove/time/cancel/restore, removed/added
+  coach, old/new times, required reason, who/role/when, `review_status`). No API writes at all —
+  only the functions below insert. Admins read all; schedulers read in-scope events' rows (plus
+  their own); coaches read none. `on delete cascade` from events so admin event deletes still work.
+- `event_assignments` gained `source` (`sprocket`/`bulk`/`manual`/`legacy` — the 238 rows that
+  existed before were all set `legacy`, origin unknowable; the importer upgrade must treat
+  `legacy` like `manual`) and `covering_for_coach_id` (set by a sub; R5 reads it). Importers now
+  tag `sprocket`/`bulk`.
+  **Gotcha:** two FKs from `event_assignments` to `coaches` now exist, so any embed of coaches
+  through assignments must name the FK: `coaches!event_assignments_coach_id_fkey(name)` (or
+  `coaches:coach_directory!event_assignments_coach_id_fkey(name)`), else PostgREST errors with an
+  ambiguous-relationship error.
+- Functions (security definer; each checks permission FIRST, then reason, then applies + logs in
+  one transaction; return the batch id): `schedule_sub`, `schedule_add`, `schedule_remove`,
+  `schedule_change_time` (optionally this + later events in the series — all-or-nothing for a
+  scheduler, refusing with "you manage N of M…"), `schedule_set_cancelled` (single event; whole-day
+  + timing is R6), `schedule_create_event` (scheduler needs a program/location rule). Refusals
+  raise errcode 42501 (PostgREST 403) with person-readable text: "Not allowed: you don't manage
+  this event." / "Not allowed: coaches can't change the schedule…" / "Not allowed: you can't
+  create events for this program at this location." Validation errors are 400 with plain text.
+  Scheduler changes → `needs_review`; admin changes → `reviewed`. Helpers (`schedule_log`,
+  `schedule_assert_can_change`, …) aren't executable by anyone via the API.
+- A trigger on `events` logs time/cancel edits made directly (the admin Edit Event form) as admin
+  changes ("Edited on the Events screen"), skipped when a function already logged it (via the
+  transaction-local `app.schedule_change_logged` setting) and for SQL-Editor edits (no
+  `auth.uid()`).
+- UI: `useScheduleAction()` (`src/utility/scheduleActions.ts`) is the only way the UI calls these
+  — it always shows the database's error text. Phone-friendly event page (`/schedule/event/:id`
+  for schedulers, `/schedule-board/event/:id` for admins) with Sub/Remove per coach, Add, Change
+  time (+series), Cancel/Restore, and the history ("Pat covered for Keith", needs-review tag, who,
+  when, reason). Scheduler schedule rows link to it; "New session" modal offers only creatable
+  program/location pairs. Admin board picker now requires a reason and saves via
+  `schedule_add`/`schedule_remove`, with an "Open event" link for subs/time/cancel. Swap approval
+  removes via `schedule_remove` (logged).
+- Verified live 2026-10-12: as TEST COACH every function → 403 coach message (incl. blank
+  reason, after 0021), direct inserts into `schedule_changes` and calling `schedule_log` denied;
+  as admin the board add, Events-form trigger, and swap approval all logged as `reviewed`; as the
+  test scheduler a UI sub on a Natick event worked (history shows "covered for", needs review),
+  the out-of-scope AP event showed the red "Not allowed: you don't manage this event." toast
+  on screen with the dialog left open, all five actions + blank-reason call on it → 403 with the
+  event unchanged, create at AP/Franklin → 403, create at Natick → OK, mixed-scope series → 403
+  with nothing changed, in-scope series → both dates moved, removing TEST COACH from a session
+  they'd already confirmed → assignment gone, **entry kept**; back as TEST COACH the subbed-out
+  session vanished from My Sessions and the confirmed entry remained pending. Not seen on screen:
+  the sub (Aimee) has no login, so "sub sees it" is verified only as her assignment row existing.
+- Test data still in place for R2c (delete at end of R2): TEST SCHEDULER + 5 Natick rules;
+  events named "R2A TEST …"/"R2B TEST …" (incl. a created "R2B TEST create natick"); the
+  TEST COACH entry "R2B TEST past" (Oct 9); Alex/Aimee assignments on them; the approved
+  "R2B TEST swap" request.

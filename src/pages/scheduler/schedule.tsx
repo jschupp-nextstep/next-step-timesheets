@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
 import { Button, Card, Empty, Space, Tag, Typography } from 'antd'
-import { LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { LeftOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
+import { Link } from 'react-router'
 import dayjs from 'dayjs'
 
 import { describeScope, type ScopeLabelRow } from '../../utility/schedulerScopes'
+import { NewSessionModal } from './NewSessionModal'
+import type { CreateScopeRow } from '../../utility/schedulerScopes'
 
 type EventRow = {
   id: string
@@ -18,7 +21,7 @@ type EventRow = {
   event_assignments: { id: string; coach_id: string; coaches: { name: string } | null }[]
 }
 
-type ScopeRow = ScopeLabelRow & { id: string }
+type ScopeRow = ScopeLabelRow & CreateScopeRow & { id: string }
 
 const formatTimeRange = (start: string | null, end: string | null) => {
   if (!start) return 'No time set'
@@ -34,12 +37,13 @@ const formatTimeRange = (start: string | null, end: string | null) => {
 export const Schedule = () => {
   const [weekStart, setWeekStart] = useState(() => dayjs().startOf('day'))
   const weekEnd = weekStart.add(6, 'day')
+  const [creating, setCreating] = useState(false)
 
   // Coach names come from coach_directory (names only), not coaches --
   // schedulers can't read the coaches table since 0018_tighten_reads.sql.
   const { result, query } = useList<EventRow>({
     resource: 'events',
-    meta: { select: '*, programs(name), locations(name), event_assignments(id, coach_id, coaches:coach_directory(name))' },
+    meta: { select: '*, programs(name), locations(name), event_assignments(id, coach_id, coaches:coach_directory!event_assignments_coach_id_fkey(name))' },
     filters: [
       { field: 'in_my_scope', operator: 'eq', value: true },
       { field: 'event_date', operator: 'gte', value: weekStart.format('YYYY-MM-DD') },
@@ -53,7 +57,7 @@ export const Schedule = () => {
   })
   const { result: scopesResult } = useList<ScopeRow>({
     resource: 'scheduler_scopes',
-    meta: { select: 'id, programs(name), locations(name), coaches:coach_directory(name)' },
+    meta: { select: 'id, program_id, location_id, coach_id, programs(name), locations(name), coaches:coach_directory(name)' },
     pagination: { pageSize: 100 },
   })
 
@@ -80,7 +84,22 @@ export const Schedule = () => {
         <Typography.Text strong>
           {weekStart.format('MMM D')} – {weekEnd.format('MMM D, YYYY')}
         </Typography.Text>
+        {scopes.some((s) => !s.coach_id) && (
+          <Button icon={<PlusOutlined />} onClick={() => setCreating(true)}>
+            New session
+          </Button>
+        )}
       </Space>
+
+      <NewSessionModal
+        open={creating}
+        scopes={scopes}
+        onClose={() => setCreating(false)}
+        onCreated={() => {
+          setCreating(false)
+          query.refetch()
+        }}
+      />
 
       {days.map((day) => {
         const key = day.format('YYYY-MM-DD')
@@ -97,9 +116,12 @@ export const Schedule = () => {
               <Empty description="No sessions" image={Empty.PRESENTED_IMAGE_SIMPLE} imageStyle={{ height: 28 }} />
             ) : (
               events.map((event) => (
-                <div
+                <Link
                   key={event.id}
+                  to={`/schedule/event/${event.id}`}
                   style={{
+                    display: 'block',
+                    color: 'inherit',
                     padding: '8px 0',
                     borderBottom: '1px solid rgba(0,0,0,0.06)',
                     opacity: event.is_cancelled ? 0.55 : 1,
@@ -122,7 +144,7 @@ export const Schedule = () => {
                       <Tag color="red">Unfilled</Tag>
                     )}
                   </div>
-                </div>
+                </Link>
               ))
             )}
           </Card>

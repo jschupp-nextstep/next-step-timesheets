@@ -242,7 +242,7 @@ export const BulkImport = () => {
           const assignmentRows = event.coachNames
             .map((name) => coachMap[name])
             .filter((id): id is string => !!id && id !== UNASSIGNED)
-            .map((coachId) => ({ event_id: inserted.id, coach_id: coachId }))
+            .map((coachId) => ({ event_id: inserted.id, coach_id: coachId, source: 'bulk' }))
 
           assignmentsLeftUnassigned += event.coachNames.filter((name) => coachMap[name] === UNASSIGNED).length
 

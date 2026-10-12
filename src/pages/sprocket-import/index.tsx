@@ -355,6 +355,8 @@ export const SprocketImport = () => {
               event_id: inserted.id,
               coach_id: coachId,
               program_id: coachProgramOverride[name] ?? null,
+              // Re-import policy: Sprocket may replace only its own rows.
+              source: 'sprocket',
             }))
 
           assignmentsSkippedUnmatched += event.assignedCoachNames.length - assignmentRows.length

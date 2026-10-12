@@ -61,6 +61,9 @@ const SchedulerCreate = lazy(() =>
   import('./pages/schedulers/create').then((m) => ({ default: m.SchedulerCreate })),
 )
 const SchedulerEdit = lazy(() => import('./pages/schedulers/edit').then((m) => ({ default: m.SchedulerEdit })))
+const ScheduleEvent = lazy(() =>
+  import('./pages/schedule-event').then((m) => ({ default: m.ScheduleEvent })),
+)
 const Schedule = lazy(() => import('./pages/scheduler/schedule').then((m) => ({ default: m.Schedule })))
 const Settings = lazy(() => import('./pages/settings').then((m) => ({ default: m.Settings })))
 
@@ -155,6 +158,7 @@ const AdminRoutes = () => (
         <Route path="edit/:id" element={<EventEdit />} />
       </Route>
       <Route path="/schedule-board" element={<ScheduleBoard />} />
+      <Route path="/schedule-board/event/:id" element={<ScheduleEvent />} />
       <Route path="/entries">
         <Route index element={<EntryList />} />
         <Route path="create" element={<EntryCreate />} />
@@ -198,6 +202,7 @@ const SchedulerRoutes = ({ isCoach }: { isCoach: boolean }) => (
     <Routes>
       <Route index element={<Navigate to="/schedule" replace />} />
       <Route path="/schedule" element={<Schedule />} />
+      <Route path="/schedule/event/:id" element={<ScheduleEvent />} />
       {isCoach && (
         <>
           <Route path="/log-session" element={<LogSession />} />
