@@ -12,6 +12,7 @@ type EntryRow = {
   session_name: string | null
   status: 'pending' | 'paid'
   paid_date: string | null
+  cutover_resolution: string | null
   coaches: { name: string } | null
   programs: { name: string } | null
 }
@@ -83,7 +84,9 @@ export const EntryList = () => {
           dataIndex="status"
           title="Status"
           render={(value: EntryRow['status'], row: EntryRow) =>
-            value === 'paid' ? (
+            row.cutover_resolution === 'paid_in_sheets' ? (
+              <Tag color="purple">Paid in Sheets</Tag>
+            ) : value === 'paid' ? (
               <Tag color="green">Paid {row.paid_date}</Tag>
             ) : (
               <Tag>Pending</Tag>

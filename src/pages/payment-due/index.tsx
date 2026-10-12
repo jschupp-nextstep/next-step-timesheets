@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { Alert, App, Button, Card, DatePicker, Segmented, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, DatePicker, Popconfirm, Segmented, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { Link } from 'react-router'
@@ -8,7 +8,13 @@ import { Link } from 'react-router'
 import { supabaseClient } from '../../utility/supabaseClient'
 import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
 import { useAppSettings } from '../../utility/appSettings'
-import { formatRange, inRange, isPreCutoverExcluded, usePayrollRange } from '../../utility/payrollFilters'
+import {
+  formatRange,
+  isPreCutoverExcluded,
+  partitionPendingEntries,
+  usePayrollRange,
+  type CutoverResolution,
+} from '../../utility/payrollFilters'
 
 type EntryRow = {
   id: string
@@ -20,6 +26,7 @@ type EntryRow = {
   session_name: string | null
   status: 'pending' | 'paid'
   admin_entered: boolean
+  cutover_resolution: CutoverResolution | null
   coaches: { name: string } | null
   programs: { name: string; entry_mode: string } | null
 }
@@ -41,8 +48,7 @@ export const PaymentDue = () => {
   const { message, modal } = App.useApp()
   const [statusFilter, setStatusFilter] = useState<'pending' | 'paid'>('pending')
   const [markingCoachId, setMarkingCoachId] = useState<string | null>(null)
-  const [selectedPreCutoverIds, setSelectedPreCutoverIds] = useState<string[]>([])
-  const [resolvingPreCutover, setResolvingPreCutover] = useState(false)
+  const [resolvingEntryId, setResolvingEntryId] = useState<string | null>(null)
 
   const { cutoverDate, paidThroughDate, isLoading: settingsLoading, refetch: refetchSettings } = useAppSettings()
   const { range, setRange, queryString } = usePayrollRange(paidThroughDate, cutoverDate)
@@ -83,20 +89,20 @@ export const PaymentDue = () => {
 
   const allEntries = result?.data ?? []
 
+  // Paid history is already range-filtered server-side; only the pre-cutover
+  // exclusion applies there.
   const { entries, preCutover, beforeRange, afterRange } = useMemo(() => {
-    const preCutover: EntryRow[] = []
-    const beforeRange: EntryRow[] = []
-    const afterRange: EntryRow[] = []
-    const entries: EntryRow[] = []
-    const start = range[0].format('YYYY-MM-DD')
-    for (const entry of allEntries) {
-      if (isPreCutoverExcluded(entry, cutoverDate)) preCutover.push(entry)
-      else if (inRange(entry.entry_date, range)) entries.push(entry)
-      else if (entry.entry_date < start) beforeRange.push(entry)
-      else afterRange.push(entry)
+    if (statusFilter === 'paid') {
+      return {
+        entries: allEntries.filter((e) => !isPreCutoverExcluded(e, cutoverDate)),
+        preCutover: [],
+        beforeRange: [],
+        afterRange: [],
+      }
     }
-    return { entries, preCutover, beforeRange, afterRange }
-  }, [allEntries, range, cutoverDate])
+    const { payable, ...rest } = partitionPendingEntries(allEntries, range, cutoverDate)
+    return { entries: payable, ...rest }
+  }, [allEntries, range, cutoverDate, statusFilter])
 
   const ratesByCoachProgram = useMemo(
     () => new Map((ratesResult?.data ?? []).map((r) => [`${r.coach_id}|${r.program_id}`, r])),
@@ -185,6 +191,11 @@ export const PaymentDue = () => {
         .from('timesheet_entries')
         .update({ status: 'paid', paid_date: dayjs().format('YYYY-MM-DD') })
         .in('id', row.entryIds)
+        // Belt and braces: even if entryIds were somehow wrong, nothing
+        // outside the selected range or already paid can be touched.
+        .eq('status', 'pending')
+        .gte('entry_date', range[0].format('YYYY-MM-DD'))
+        .lte('entry_date', range[1].format('YYYY-MM-DD'))
       if (error) {
         message.error(`Couldn't mark as paid: ${error.message}`)
         return
@@ -206,30 +217,37 @@ export const PaymentDue = () => {
     })
   }
 
-  // One-time cutover cleanup: pending entries dated before cutover that a
-  // coach (or, before 0015, anyone) logged here. Either they were already
-  // paid in Sheets -- mark them paid so they can never be paid again -- or
-  // they genuinely weren't, and an admin blesses them as payable here.
-  const resolvePreCutover = async (action: 'paid_in_sheets' | 'pay_in_app') => {
-    if (selectedPreCutoverIds.length === 0) return
-    setResolvingPreCutover(true)
+  // One-time cutover cleanup, decided entry by entry: some September
+  // sessions were paid in Sheets, some never were. The trigger in 0016
+  // rejects a resolution on any entry dated on/after cutover, and the
+  // .lt() below means this update can't even match one.
+  const resolvePreCutover = async (entry: EntryRow, resolution: CutoverResolution) => {
+    if (!cutoverDate) return
+    setResolvingEntryId(entry.id)
     try {
-      const values =
-        action === 'paid_in_sheets' ? { status: 'paid', paid_date: null } : { admin_entered: true }
-      const { error } = await supabaseClient.from('timesheet_entries').update(values).in('id', selectedPreCutoverIds)
+      const { data, error } = await supabaseClient
+        .from('timesheet_entries')
+        .update({ cutover_resolution: resolution })
+        .eq('id', entry.id)
+        .eq('status', 'pending')
+        .lt('entry_date', cutoverDate)
+        .select('id')
       if (error) {
         message.error(`Couldn't update: ${error.message}`)
         return
       }
-      message.success(
-        action === 'paid_in_sheets'
-          ? `Marked ${selectedPreCutoverIds.length} as paid in the old system`
-          : `${selectedPreCutoverIds.length} moved into Payment Due`,
-      )
-      setSelectedPreCutoverIds([])
+      if (!data || data.length === 0) {
+        message.warning('Nothing changed -- this entry is no longer a pending pre-cutover entry.')
+      } else {
+        message.success(
+          resolution === 'paid_in_sheets'
+            ? `${entry.coaches?.name ?? 'Entry'} ${entry.entry_date}: marked paid in Sheets`
+            : `${entry.coaches?.name ?? 'Entry'} ${entry.entry_date}: still owed -- now payable here`,
+        )
+      }
       query.refetch()
     } finally {
-      setResolvingPreCutover(false)
+      setResolvingEntryId(null)
     }
   }
 
@@ -365,47 +383,14 @@ export const PaymentDue = () => {
       </Card>
 
       {statusFilter === 'pending' && preCutover.length > 0 && (
-        <Card
-          size="small"
-          style={{ marginTop: 16 }}
-          title={`Pending entries dated before cutover (${preCutover.length})`}
-          extra={
-            <Space>
-              <Button
-                size="small"
-                disabled={selectedPreCutoverIds.length === 0}
-                loading={resolvingPreCutover}
-                onClick={() => resolvePreCutover('paid_in_sheets')}
-              >
-                Paid in old system
-              </Button>
-              <Button
-                size="small"
-                disabled={selectedPreCutoverIds.length === 0}
-                loading={resolvingPreCutover}
-                onClick={() => resolvePreCutover('pay_in_app')}
-              >
-                Pay in app
-              </Button>
-            </Space>
-          }
-        >
+        <Card size="small" style={{ marginTop: 16 }} title={`Pending entries dated before cutover (${preCutover.length})`}>
           <Typography.Paragraph type="secondary">
             These are dated before {cutoverDate && dayjs(cutoverDate).format('MMM D, YYYY')}, when payroll still ran in
-            Sheets, so they're left out of Payment Due and the Zoho export. Mark the ones Sheets already paid as{' '}
-            <strong>Paid in old system</strong> (they'll never be payable here). Use <strong>Pay in app</strong> only for
-            ones Sheets didn't pay.
+            Sheets, so they're left out of Payment Due and the Zoho export until you decide each one.{' '}
+            <strong>Paid in Sheets</strong> records that Sheets paid it (never payable here).{' '}
+            <strong>Still owed</strong> means Sheets never paid it -- it moves into Payment Due above.
           </Typography.Paragraph>
-          <Table<EntryRow>
-            dataSource={preCutover}
-            rowKey="id"
-            size="small"
-            pagination={false}
-            rowSelection={{
-              selectedRowKeys: selectedPreCutoverIds,
-              onChange: (keys) => setSelectedPreCutoverIds(keys as string[]),
-            }}
-          >
+          <Table<EntryRow> dataSource={preCutover} rowKey="id" size="small" pagination={false}>
             <Table.Column dataIndex="entry_date" title="Date" width={110} />
             <Table.Column title="Coach" render={(_, row: EntryRow) => row.coaches?.name ?? '—'} />
             <Table.Column title="Program" render={(_, row: EntryRow) => row.programs?.name ?? '—'} />
@@ -415,6 +400,34 @@ export const PaymentDue = () => {
               render={(_, row: EntryRow) =>
                 row.flat_amount != null ? `$${row.flat_amount.toFixed(2)}` : row.hours != null ? row.hours.toFixed(2) : '—'
               }
+            />
+            <Table.Column
+              title="Decision"
+              width={220}
+              render={(_, row: EntryRow) => (
+                <Space>
+                  <Popconfirm
+                    title="Mark as paid in Sheets?"
+                    description="It will never be payable in this app."
+                    okText="Paid in Sheets"
+                    onConfirm={() => resolvePreCutover(row, 'paid_in_sheets')}
+                  >
+                    <Button size="small" loading={resolvingEntryId === row.id}>
+                      Paid in Sheets
+                    </Button>
+                  </Popconfirm>
+                  <Popconfirm
+                    title="Sheets never paid this?"
+                    description="It moves into Payment Due to be paid here."
+                    okText="Still owed"
+                    onConfirm={() => resolvePreCutover(row, 'still_owed')}
+                  >
+                    <Button size="small" loading={resolvingEntryId === row.id}>
+                      Still owed
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              )}
             />
           </Table>
         </Card>

@@ -570,7 +570,7 @@ doc didn't know about, worth remembering when building the rest:
 - **Sprocket's `ArrivalTime` column isn't parsed at all** (R3).
 - Schedule Board and swap approval **delete** `event_assignments` rows — no history survives (R2).
 
-### Done: Payment Due date range + R1 cutover (2026-10-12, migration `0015_cutover.sql`)
+### Done: Payment Due date range + R1 cutover (2026-10-12, migrations `0015_cutover.sql` + `0016_cutover_resolution.sql`)
 
 **The bug fixed first:** Payment Due had no date range — it loaded every pending entry, and "Mark
 all paid" marked all of a coach's pending entries — while the Zoho export *was* date-ranged and
@@ -602,13 +602,32 @@ an earlier period were ever added.
   `claim_date(event_id, approx_date)`). This also closes logging in advance (Prince/Milo) at the
   DB level, and covers Office Hours/1v1/reimbursements, which have no band limits at all. Coach
   *delete* of pending entries was left unrestricted (deleting can't cause a payment).
-- **`timesheet_entries.admin_entered`** — the "unless Justin enters it" exception. Set by a
-  `before insert or update` trigger from `is_admin()`, never trusted from the client; on update
-  only an admin can change it. Existing rows backfilled `false`. Payment Due and the Zoho export
-  exclude `entry_date < cutover and not admin_entered`.
-- **Cleanup card** on Payment Due lists pending pre-cutover entries with "Paid in old system"
-  (status `paid`, `paid_date` null) or "Pay in app" (sets `admin_entered`). At build time the
-  only ones were 7 July TEST COACH entries.
+- **`timesheet_entries.admin_entered`** — provenance, the "unless Justin enters it" exception.
+  Set by a `before insert or update` trigger from `is_admin()` on insert, never trusted from the
+  client, and **immutable afterward for everyone, admins included** (0016 — 0015 originally let
+  an admin flip it, which mixed "who entered this" with "what did we decide"). Existing rows
+  backfilled `false`. Admin-approved claims count as admin-entered: approval inserts the entry
+  while an admin is logged in. A `hours_correction` approval that *updates* a coach's existing
+  entry keeps the coach's `false` — correct, since claims can't be pre-cutover anyway.
+- **`timesheet_entries.cutover_resolution`** (0016) — the per-entry decision on a pre-cutover
+  pending entry: `paid_in_sheets` (a distinct marker, not just ordinary `paid`; the trigger also
+  forces `status = 'paid'`, `paid_date = null` so every existing "already paid" check still
+  applies) or `still_owed` (Sheets never paid it — payable here). Admin-only (trigger reverts a
+  coach's change), and the trigger **raises** if it's set on an entry dated on/after cutover.
+  Payment Due and the Zoho export exclude `entry_date < cutover and not admin_entered and
+  cutover_resolution is distinct from 'still_owed'`.
+- **Cleanup card** on Payment Due lists each undecided pending pre-cutover entry with its own
+  "Paid in Sheets" / "Still owed" buttons (Popconfirm each) — deliberately no bulk select, since
+  some September sessions were paid in Sheets and some weren't. The update also filters
+  `.lt('entry_date', cutover)`; "Mark all paid" likewise filters to the selected range and
+  `status = 'pending'` server-side, on top of the client-side partition. "Paid in Sheets" shows
+  as "Old system" in coach Paid history and a purple tag on the admin entries list. At build time
+  the only pre-cutover pending entries were 7 July TEST COACH entries.
+- **Tests** — first in the repo: Vitest (`npm test`), `src/utility/payrollFilters.test.ts`.
+  The partition logic was pulled out of Payment Due into `partitionPendingEntries` so it's
+  testable: the cleanup bucket never contains a post-cutover entry under any flag combination,
+  and the payable bucket ("Mark all paid" scope) is exactly the selected range, boundaries
+  inclusive, every entry in exactly one bucket. Not wired into the GitHub Actions deploy.
 - Coach UI mirrors it: every date picker blocks pre-cutover dates; edit/confirm/correct on a
   pre-cutover session shows a "handled in the old system" notice instead of a form; My Sessions'
   "Not yet logged" skips pre-cutover assignments; the unassigned-claim window starts at cutover.

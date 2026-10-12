@@ -6,7 +6,7 @@ import dayjs from 'dayjs'
 
 import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
 import { useAppSettings } from '../../utility/appSettings'
-import { isPreCutoverExcluded, usePayrollRange } from '../../utility/payrollFilters'
+import { isPreCutoverExcluded, usePayrollRange, type CutoverResolution } from '../../utility/payrollFilters'
 
 type EntryRow = {
   id: string
@@ -18,6 +18,7 @@ type EntryRow = {
   notes: string | null
   status: 'pending' | 'paid'
   admin_entered: boolean
+  cutover_resolution: CutoverResolution | null
   coaches: { name: string; pay_type: '1099' | 'w2' } | null
   programs: { name: string; entry_mode: string } | null
 }

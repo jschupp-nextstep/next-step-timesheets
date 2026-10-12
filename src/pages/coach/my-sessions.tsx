@@ -89,6 +89,7 @@ type TimesheetEntryRow = {
   notes: string | null
   status: 'pending' | 'paid'
   paid_date: string | null
+  cutover_resolution: string | null
   event_id: string | null
   programs: { name: string } | null
   locations: { name: string } | null
@@ -518,7 +519,13 @@ export const MySessions = () => {
                 render={(_, row: TimesheetEntryRow) => (row.hours != null ? row.hours.toFixed(2) : '—')}
               />
               <Table.Column title="Amount" render={(_, row: TimesheetEntryRow) => formatAmount(row)} />
-              <Table.Column dataIndex="paid_date" title="Paid" width={110} render={(v) => v || '—'} />
+              <Table.Column
+                title="Paid"
+                width={110}
+                render={(_, row: TimesheetEntryRow) =>
+                  row.cutover_resolution === 'paid_in_sheets' ? 'Old system' : row.paid_date || '—'
+                }
+              />
             </Table>
           )}
         </Card>

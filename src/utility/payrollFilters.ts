@@ -12,14 +12,43 @@ import { isBeforeCutover } from './appSettings'
 
 export type PayrollRange = [Dayjs, Dayjs]
 
+export type CutoverResolution = 'paid_in_sheets' | 'still_owed'
+
+export type PayrollFilterEntry = {
+  entry_date: string
+  admin_entered: boolean
+  cutover_resolution: CutoverResolution | null
+}
+
 // Pre-cutover entries were paid in the old Sheets system -- excluded from
-// payroll unless an admin entered them (admin_entered is set by trigger,
-// never by the client; see 0015_cutover.sql).
-export function isPreCutoverExcluded(
-  entry: { entry_date: string; admin_entered: boolean },
+// payroll unless an admin entered them (admin_entered, set by trigger on
+// insert and immutable afterward) or an admin resolved them as still owed
+// on Payment Due's cleanup card. See 0015/0016 migrations.
+export function isPreCutoverExcluded(entry: PayrollFilterEntry, cutoverDate: string | null): boolean {
+  return isBeforeCutover(entry.entry_date, cutoverDate) && !entry.admin_entered && entry.cutover_resolution !== 'still_owed'
+}
+
+// Splits pending entries for Payment Due: `payable` is exactly what the
+// table shows and what "Mark all paid" may touch; `preCutover` is exactly
+// what the cleanup card lists. The two never overlap, and nothing dated on
+// or after cutover can ever land in `preCutover`.
+export function partitionPendingEntries<T extends PayrollFilterEntry>(
+  entries: T[],
+  range: PayrollRange,
   cutoverDate: string | null,
-): boolean {
-  return isBeforeCutover(entry.entry_date, cutoverDate) && !entry.admin_entered
+) {
+  const payable: T[] = []
+  const preCutover: T[] = []
+  const beforeRange: T[] = []
+  const afterRange: T[] = []
+  const start = range[0].format('YYYY-MM-DD')
+  for (const entry of entries) {
+    if (isPreCutoverExcluded(entry, cutoverDate)) preCutover.push(entry)
+    else if (inRange(entry.entry_date, range)) payable.push(entry)
+    else if (entry.entry_date < start) beforeRange.push(entry)
+    else afterRange.push(entry)
+  }
+  return { payable, preCutover, beforeRange, afterRange }
 }
 
 // "Since last payroll": the day after paid_through_date through today. Falls
