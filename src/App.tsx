@@ -54,7 +54,9 @@ const ScheduleBoard = lazy(() =>
   import('./pages/schedule-board').then((m) => ({ default: m.ScheduleBoard })),
 )
 const EntryList = lazy(() => import('./pages/entries/list').then((m) => ({ default: m.EntryList })))
+const EntryCreate = lazy(() => import('./pages/entries/create').then((m) => ({ default: m.EntryCreate })))
 const EntryEdit = lazy(() => import('./pages/entries/edit').then((m) => ({ default: m.EntryEdit })))
+const Settings = lazy(() => import('./pages/settings').then((m) => ({ default: m.Settings })))
 
 const SprocketImport = lazy(() =>
   import('./pages/sprocket-import').then((m) => ({ default: m.SprocketImport })),
@@ -149,6 +151,7 @@ const AdminRoutes = () => (
       <Route path="/schedule-board" element={<ScheduleBoard />} />
       <Route path="/entries">
         <Route index element={<EntryList />} />
+        <Route path="create" element={<EntryCreate />} />
         <Route path="edit/:id" element={<EntryEdit />} />
       </Route>
       <Route path="/sprocket-import" element={<SprocketImport />} />
@@ -156,6 +159,7 @@ const AdminRoutes = () => (
       <Route path="/reconciliation" element={<Reconciliation />} />
       <Route path="/payment-due" element={<PaymentDue />} />
       <Route path="/zoho-export" element={<ZohoExport />} />
+      <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<ErrorComponent />} />
     </Routes>
   </ThemedLayout>
@@ -300,6 +304,7 @@ function App() {
                 {
                   name: 'timesheet_entries',
                   list: '/entries',
+                  create: '/entries/create',
                   edit: '/entries/edit/:id',
                   meta: { label: 'Timesheet Entries' },
                 },
@@ -327,6 +332,11 @@ function App() {
                   name: 'zoho-export',
                   list: '/zoho-export',
                   meta: { label: 'Zoho Export' },
+                },
+                {
+                  name: 'app_settings',
+                  list: '/settings',
+                  meta: { label: 'Settings' },
                 },
               ]}
               options={{

@@ -5,6 +5,7 @@ import dayjs from 'dayjs'
 
 import type { Identity } from '../../providers/authProvider'
 import { computeBands, type PayPeriod } from '../../utils/payPeriods'
+import { useAppSettings } from '../../utility/appSettings'
 import { EventClaimForm } from './EventClaimForm'
 
 // The only way to claim an event you weren't assigned to -- Band A's normal
@@ -22,8 +23,12 @@ export const UnassignedClaim = () => {
     pagination: { pageSize: 500 },
   })
   const bands = computeBands(periodsResult?.data ?? [], dayjs().format('YYYY-MM-DD'))
+  const { cutoverDate, isLoading: settingsLoading } = useAppSettings()
+  // Nothing before cutover is claimable -- it was paid in the old system.
+  const minDate =
+    bands.bandA && cutoverDate && cutoverDate > bands.bandA.start ? cutoverDate : bands.bandA?.start
 
-  if (periodsQuery.isLoading) {
+  if (periodsQuery.isLoading || settingsLoading) {
     return (
       <div style={{ maxWidth: 560 }}>
         <Typography.Title level={3}>Don't See Something You Coached?</Typography.Title>
@@ -32,7 +37,7 @@ export const UnassignedClaim = () => {
     )
   }
 
-  if (!bands.hasCurrentPeriod || !bands.bandA || !coachId) {
+  if (!bands.hasCurrentPeriod || !bands.bandA || !minDate || !coachId) {
     return (
       <div style={{ maxWidth: 560 }}>
         <Typography.Title level={3}>Don't See Something You Coached?</Typography.Title>
@@ -52,7 +57,7 @@ export const UnassignedClaim = () => {
         <EventClaimForm
           coachId={coachId}
           claimType="unassigned_claim"
-          minDate={bands.bandA.start}
+          minDate={minDate}
           maxDate={bands.bandA.end}
           description="Flag a session you actually coached but weren't listed on (or nobody was listed on at all). An admin will review this before it becomes payable."
           submitLabel="Send for review"

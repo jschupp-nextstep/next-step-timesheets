@@ -8,6 +8,7 @@ import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
 import { FIXED_HOURS_HALF, FIXED_HOURS_FULL, timeSpanHours, resolveEventHours } from '../../utils/hours'
 import { computeBands, classifyDate, type PayPeriod } from '../../utils/payPeriods'
+import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
 import { BandCUnstructuredClaimForm } from './BandCUnstructuredClaimForm'
 
 type ProgramRow = { id: string; name: string; entry_mode: string }
@@ -148,6 +149,8 @@ export const LogSession = () => {
     sorters: [{ field: 'start_date', order: 'asc' }],
     pagination: { pageSize: 500 },
   })
+
+  const { cutoverDate, isLoading: settingsLoading } = useAppSettings()
 
   const programs = programsResult?.data ?? []
   const locations = locationsResult?.data ?? []
@@ -539,6 +542,32 @@ export const LogSession = () => {
     )
   }
 
+  // Sessions before cutover were handled in the old Sheets system -- RLS
+  // rejects any coach write dated before it, so say so up front rather than
+  // letting the coach fill out a form that can only fail on submit.
+  const lockedDate = isEditMode
+    ? editEntry?.entry_date
+    : isConfirmMode
+      ? confirmEventResult?.event_date
+      : isCorrectionMode
+        ? correctionEventResult?.event_date
+        : undefined
+  if (!settingsLoading && lockedDate && isBeforeCutover(lockedDate, cutoverDate)) {
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>
+          {isEditMode ? 'Edit Entry' : isConfirmMode ? 'Confirm Hours' : 'Request a Correction'}
+        </Typography.Title>
+        <Alert
+          type="info"
+          showIcon
+          message={`This session is from before ${dayjs(cutoverDate).format('MMM D, YYYY')}, when payroll still ran in the old timesheet system.`}
+          description="It can't be logged or changed here. If something about it is wrong, contact an admin."
+        />
+      </div>
+    )
+  }
+
   if (isEditMode && editEntry?.status === 'paid') {
     return (
       <div style={{ maxWidth: 560 }}>
@@ -693,7 +722,7 @@ export const LogSession = () => {
             <DatePicker
               style={{ width: '100%' }}
               value={entryDate}
-              disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+              disabledDate={(d) => d.isAfter(dayjs(), 'day') || isBeforeCutover(d.format('YYYY-MM-DD'), cutoverDate)}
               onChange={(value) => {
                 setEntryDate(value ?? dayjs())
                 setProgramId(null)

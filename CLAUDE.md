@@ -151,7 +151,9 @@ calendar tie-in) are both fully coach self-service, as is an "Other (not on the 
 hatch inside the `session` flow for a real session that isn't on the calendar. `direct_flat` (1v1)
 is also coach self-service (pick a session length, no calendar tie-in). `admin_only` (Set-up/
 Break-down, Stipend) is **never shown to a coach at all** — an admin has to enter these by hand on
-the generic Timesheet Entries admin screen; there is no coach-initiated request/approval flow for
+the generic Timesheet Entries admin screen (`/entries/create` — which, despite this line predating
+it, didn't actually exist until the cutover work on 2026-10-12; before that the admin screen was
+list/edit only); there is no coach-initiated request/approval flow for
 this, unlike the oversight-fee pattern above. `backend_only` (Coaching) isn't a loggable entry
 type on either side — it exists purely as the rate-lookup fallback target.
 
@@ -183,6 +185,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2–R9 not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -206,7 +209,7 @@ hours. Justin has full summer runway, not a tight 2–3 week window.
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0014`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0015`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -540,3 +543,86 @@ all** — only an admin `for all` policy, a coach read-only self-select, and a c
 update limited to `coach_confirmed_at`. That already fully satisfies "admin-only write path, no
 new coach-facing surface" — the new page just needed to live under `AdminRoutes` like
 `/sprocket-import` does. No migration, no RLS change, for this entire feature.
+
+---
+
+## Payroll lessons (Oct 2026) — R1–R9
+
+Justin ran the Sep 1 – Oct 6, 2026 payroll on the old Sheets system and wrote up what it surfaced
+as nine requirements (R1 cutover, R2 on-the-fly schedule changes with a scheduler role/history/
+review queue, R3 paid-time rules for AP +15 min and game warm-ups, R4 entry Hold/Canceled/Not Next
+Step statuses with admin→coach questions, R5 double-pay flag on covered sessions, R6 whole-day
+cancellations, R7 weekly-rate coaches, R8 rate history + paid-at amounts + adjustments, R9 AP
+attendance from Luis). Assessed against the code on 2026-10-12. Findings that the requirements
+doc didn't know about, worth remembering when building the rest:
+
+- **Payment Due ignores Reconciliation entirely.** Cancelled events, "Other (not on the calendar)"
+  entries (straight to pending, flagged `missing_event` in Reconciliation only), and anything else
+  Reconciliation flags are still paid by default. R2's payroll gate, R4's Hold, and R6's
+  cancelled-not-paid all need the same thing — **build one shared "payable" predicate** in
+  `src/utility/payrollFilters.ts` (where `isPreCutoverExcluded` already lives) rather than three
+  separate filters.
+- **Paid history is recomputed from current rates.** `computeAmount` runs at render time for paid
+  entries too, so a rate change today rewrites what already-paid entries display (R8 — worse than
+  "unpaid entries change value").
+- **The Coaching-rate fallback is silent** in Payment Due (`payroll.ts`) — Justin wants it visible
+  ("probably Coaching, but ask me").
+- **Sprocket's `ArrivalTime` column isn't parsed at all** (R3).
+- Schedule Board and swap approval **delete** `event_assignments` rows — no history survives (R2).
+
+### Done: Payment Due date range + R1 cutover (2026-10-12, migration `0015_cutover.sql`)
+
+**The bug fixed first:** Payment Due had no date range — it loaded every pending entry, and "Mark
+all paid" marked all of a coach's pending entries — while the Zoho export *was* date-ranged and
+told you to go mark entries paid on Payment Due afterward. Exporting Sep 1–Oct 6 and then clicking
+"Mark all paid" would have marked Oct 7+ entries paid that were never exported.
+
+- **Shared range** (`usePayrollRange` in `src/utility/payrollFilters.ts`), carried in the URL
+  (`?from=&to=`) so Payment Due ↔ Zoho export links keep the same payroll run. Default is
+  "since last payroll": the day after `app_settings.paid_through_date` through today. **Not**
+  "day after the latest `paid_date`" — paid_date is when you clicked, not the period end, so that
+  would skip sessions between period end and payroll day.
+- **`paid_through_date` advances automatically only once every payable entry in the range is
+  paid**, never backwards. A coach held back (e.g. missing rate) keeps it from advancing, so their
+  entries can't fall out of the next default range. Warnings show counts of pending entries
+  before/after the range, with an "Include them" button for the earlier ones.
+- "Mark all paid" now confirms with the date range and total first.
+- Pending tab fetches all pending entries and partitions client-side (so out-of-range and
+  pre-cutover counts are visible); Paid history is range-filtered server-side since it grows.
+
+**Cutover** — `app_settings` (single row, `id = 1`): `cutover_date` (2026-10-07) and
+`paid_through_date`. Editable on `/settings`. Kept separate from `pay_periods` deliberately: band
+math counts periods by row position, so "cutover = first pay_periods row" would silently move if
+an earlier period were ever added.
+
+- **Enforced in RLS, not just the UI** — the first time a coach-facing date rule is. New
+  `coach_date_allowed(d)`: `d >= cutover_date()` and `d <= today in America/New_York` (explicit
+  timezone — `current_date` is UTC and runs a day ahead every evening). Applied to coach
+  insert/update on `timesheet_entries` and coach insert on `payment_claims` (via
+  `claim_date(event_id, approx_date)`). This also closes logging in advance (Prince/Milo) at the
+  DB level, and covers Office Hours/1v1/reimbursements, which have no band limits at all. Coach
+  *delete* of pending entries was left unrestricted (deleting can't cause a payment).
+- **`timesheet_entries.admin_entered`** — the "unless Justin enters it" exception. Set by a
+  `before insert or update` trigger from `is_admin()`, never trusted from the client; on update
+  only an admin can change it. Existing rows backfilled `false`. Payment Due and the Zoho export
+  exclude `entry_date < cutover and not admin_entered`.
+- **Cleanup card** on Payment Due lists pending pre-cutover entries with "Paid in old system"
+  (status `paid`, `paid_date` null) or "Pay in app" (sets `admin_entered`). At build time the
+  only ones were 7 July TEST COACH entries.
+- Coach UI mirrors it: every date picker blocks pre-cutover dates; edit/confirm/correct on a
+  pre-cutover session shows a "handled in the old system" notice instead of a form; My Sessions'
+  "Not yet logged" skips pre-cutover assignments; the unassigned-claim window starts at cutover.
+- **New `/entries/create`** admin screen (hours or flat amount required).
+- **Fixed in passing:** `0014` never gave coaches an UPDATE policy on `payment_claims`, so
+  "resubmitting a pending correction updates it in place" (log-session.tsx) matched zero rows and
+  silently did nothing while showing success. `0015` adds one (own, still-pending claims only;
+  `with check` keeps status `pending`, so a coach can't decide their own claim). Not live-tested
+  end-to-end — doing so would have left a test claim in the admin queue.
+
+Verified against the real project 2026-10-12: as a coach, raw REST inserts dated 9/15 and
+tomorrow were rejected by RLS, 10/8 accepted with `admin_entered = false`; forging
+`admin_entered = true` was silently reverted by the trigger; moving an entry to 9/15 and a 9/15
+`unstructured` claim were both rejected; the coach date picker enabled exactly 10/7–today. As
+admin, a 9/15 admin-entered entry appeared in Payment Due only when the range included it; "Mark
+all paid" over 10/7–10/10 paid only the 10/8 entry, left 9/15 pending, and advanced paid-through
+to 10/10 (then reset to 10/6 and test rows deleted).

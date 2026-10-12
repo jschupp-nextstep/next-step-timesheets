@@ -6,6 +6,7 @@ import dayjs from 'dayjs'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
+import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
 
 type EventAssignmentRow = {
   id: string
@@ -128,6 +129,7 @@ export const MySessions = () => {
   const minAssignmentDate = dayjs().subtract(ASSIGNMENT_LOOKBACK_DAYS, 'day').format('YYYY-MM-DD')
   const maxAssignmentDate = dayjs().add(ASSIGNMENT_LOOKAHEAD_DAYS, 'day').format('YYYY-MM-DD')
   const today = dayjs().format('YYYY-MM-DD')
+  const { cutoverDate } = useAppSettings()
 
   const { result: assignmentsResult, query: assignmentsQuery } = useList<EventAssignmentRow>({
     resource: 'event_assignments',
@@ -205,11 +207,13 @@ export const MySessions = () => {
     () =>
       assignments
         .filter(
-          (a) => a.events && !a.events.is_cancelled && a.events.event_date <= today && !loggedEventIds.has(a.event_id),
+          (a) => a.events && !a.events.is_cancelled && a.events.event_date <= today &&
+            !isBeforeCutover(a.events.event_date, cutoverDate) &&
+            !loggedEventIds.has(a.event_id),
         )
         .map((a) => a.events!)
         .sort((a, b) => b.event_date.localeCompare(a.event_date)),
-    [assignments, loggedEventIds, today],
+    [assignments, loggedEventIds, today, cutoverDate],
   )
 
   const upcoming = useMemo(

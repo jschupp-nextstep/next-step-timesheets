@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useList } from '@refinedev/core'
 import { Alert, App, Button, Card, DatePicker, Space, Table, Typography } from 'antd'
 import { Link } from 'react-router'
-import dayjs, { type Dayjs } from 'dayjs'
+import dayjs from 'dayjs'
 
 import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
+import { useAppSettings } from '../../utility/appSettings'
+import { isPreCutoverExcluded, usePayrollRange } from '../../utility/payrollFilters'
 
 type EntryRow = {
   id: string
@@ -15,6 +17,7 @@ type EntryRow = {
   flat_amount: number | null
   notes: string | null
   status: 'pending' | 'paid'
+  admin_entered: boolean
   coaches: { name: string; pay_type: '1099' | 'w2' } | null
   programs: { name: string; entry_mode: string } | null
 }
@@ -87,10 +90,8 @@ function downloadCsv(filename: string, content: string) {
 
 export const ZohoExport = () => {
   const { message } = App.useApp()
-  const [range, setRange] = useState<[Dayjs, Dayjs]>([
-    dayjs().startOf('month'),
-    dayjs().endOf('month'),
-  ])
+  const { cutoverDate, paidThroughDate, isLoading: settingsLoading } = useAppSettings()
+  const { range, setRange, queryString } = usePayrollRange(paidThroughDate, cutoverDate)
 
   const { result, query } = useList<EntryRow>({
     resource: 'timesheet_entries',
@@ -101,7 +102,14 @@ export const ZohoExport = () => {
       { field: 'entry_date', operator: 'lte', value: range[1].format('YYYY-MM-DD') },
     ],
     pagination: { pageSize: 2000 },
+    queryOptions: { enabled: !settingsLoading },
   })
+  // Same exclusion Payment Due applies -- pre-cutover entries were paid in
+  // Sheets unless an admin entered them here.
+  const payableEntries = useMemo(
+    () => (result?.data ?? []).filter((e) => !isPreCutoverExcluded(e, cutoverDate)),
+    [result?.data, cutoverDate],
+  )
   const { result: ratesResult } = useList<RateRow>({
     resource: 'rates',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
@@ -129,15 +137,15 @@ export const ZohoExport = () => {
 
   const entries1099 = useMemo(
     () =>
-      (result?.data ?? []).filter(
+      payableEntries.filter(
         (e) => e.coaches?.pay_type === '1099' && e.programs?.entry_mode !== 'reimbursement',
       ),
-    [result?.data],
+    [payableEntries],
   )
 
   const reimbursementEntries = useMemo(
-    () => (result?.data ?? []).filter((e) => e.programs?.entry_mode === 'reimbursement'),
-    [result?.data],
+    () => payableEntries.filter((e) => e.programs?.entry_mode === 'reimbursement'),
+    [payableEntries],
   )
   const reimbursementTotal = useMemo(
     () => reimbursementEntries.reduce((sum, e) => sum + (e.flat_amount ?? 0), 0),
@@ -273,6 +281,7 @@ export const ZohoExport = () => {
           onChange={(value) => value?.[0] && value[1] && setRange([value[0], value[1]])}
           allowClear={false}
         />
+        <Link to={`/payment-due?${queryString}`}>Payment Due for these dates →</Link>
       </Space>
 
       {flagged.length > 0 && (
@@ -351,8 +360,8 @@ export const ZohoExport = () => {
           </Button>
         </Space>
         <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
-          After confirming this imports cleanly into Zoho Books, go mark these entries paid on the
-          Payment Due page -- this screen only generates the export, it doesn't change any entry's
+          After confirming this imports cleanly into Zoho Books, go mark these entries paid on{' '}
+          <Link to={`/payment-due?${queryString}`}>Payment Due for the same dates</Link> -- this screen only generates the export, it doesn't change any entry's
           status itself.
         </Typography.Paragraph>
       </Card>
