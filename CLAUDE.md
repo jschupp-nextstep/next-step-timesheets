@@ -185,7 +185,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2a (roles) + R2b (logged quick actions) done 2026-10-12; R2c–R2d and R3–R9 not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2a (roles), R2b (logged quick actions), R2c (review queue + payroll hold) done 2026-10-12; R2d and R3–R9 not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -204,12 +204,27 @@ hours. Justin has full summer runway, not a tight 2–3 week window.
 
 ---
 
+### Migration ↔ deploy rule (added 2026-10-12)
+
+Migrations are run by hand in the SQL Editor and the frontend deploys on push to `main`, so for a
+while one is live without the other. **Every migration must work with both the currently deployed
+code and the new code — or be run at the same moment as the matching push — so the live site never
+breaks in between.** Learned the hard way in R2b: `0020` added a second FK from `event_assignments`
+to `coaches`, which made the deployed Schedule Board's `coaches(name)` embed ambiguous and broke it
+until the push landed. Practical checklist before handing over a migration:
+- Additive first (new tables/columns/functions), removals and renames only after the code that
+  stops using them is deployed.
+- Anything that changes how existing queries resolve (new FKs, dropped columns, tightened RLS,
+  renamed functions) — check the deployed code's queries against it, and ship the compatible code
+  *first* when possible (e.g. FK-name hints work before the second FK exists).
+- If that's impossible, say so explicitly and run the migration and the push together.
+
 ## Where things stand right now
 
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0021`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0022`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -797,7 +812,40 @@ grants (no drift from the migration files was found).
   they'd already confirmed → assignment gone, **entry kept**; back as TEST COACH the subbed-out
   session vanished from My Sessions and the confirmed entry remained pending. Not seen on screen:
   the sub (Aimee) has no login, so "sub sees it" is verified only as her assignment row existing.
-- Test data still in place for R2c (delete at end of R2): TEST SCHEDULER + 5 Natick rules;
-  events named "R2A TEST …"/"R2B TEST …" (incl. a created "R2B TEST create natick"); the
-  TEST COACH entry "R2B TEST past" (Oct 9); Alex/Aimee assignments on them; the approved
-  "R2B TEST swap" request.
+- The "sub sees it" gap above was closed in R2c: real coaches (Aimee, Alex) were scrubbed from the
+  test data via SQL and replaced with a second test login, **TEST COACH 2**
+  (`schupp.14+coach@gmail.com`, roster initials TC2).
+
+**R2c done (2026-10-12, `0022_schedule_review.sql`):**
+- `schedule_mark_reviewed(ids)` and `schedule_reverse(id, reason)` — admin-only (anyone else gets
+  403 "Not allowed: only an admin can review/reverse schedule changes."). Reverse applies the
+  inverse as new admin-logged changes ("Reversed: …"), marks the original `reversed`, and
+  **refuses rather than clobbering** if the schedule moved on since (sub/added coach no longer
+  there, removed coach already back, time changed again — "Reverse the later change first",
+  already cancelled/active). Reversing a `create` cancels the event (entries may point at it).
+- **Payroll hold**: an entry is held while its event has any `needs_review` change. Computed in
+  the shared `partitionPendingEntries(..., heldEventIds)` (new `held` bucket; `useHeldEventIds()`
+  in `payrollFilters.ts`), so Payment Due and the Zoho export agree. Payment Due shows a "held for
+  schedule review" warning listing them; "Mark all paid" also filters held events server-side
+  (keeping `event_id IS NULL` off-calendar entries eligible); `paid_through_date` won't advance
+  while held entries in the range are unpaid. Out-of-range/pre-cutover entries keep their buckets.
+- Reconciliation → **"Schedule changes to review"** card (`ScheduleChangesCard.tsx`): grouped by
+  event, Mark reviewed / Reverse (reason required) per change, Mark all reviewed per event, and the
+  event's entries with flags: taken off the session after logging (kept; edit/delete in Timesheet
+  Entries), already paid (no clawback), recorded hours ≠ session's current worth after a time
+  change (pending → one-click "Update to N hrs" via `resolveEventHours`; paid → no clawback),
+  cancelled-with-hours (decision deferred to R6).
+- Verified live 2026-10-12: as the scheduler, a sub TEST COACH → TEST COACH 2 and a time change on
+  the Oct 9 session (whose entry was already confirmed); review/reverse → 403. As TEST COACH 2
+  (on the deployed site) the session appeared under Upcoming immediately; as TEST COACH it was
+  gone while the Oct 9 entry stayed pending. As admin: Payment Due (Oct 7–12) listed the Oct 9
+  entry as held and excluded it, Zoho excluded it; the queue showed both flags; "Update to 1.50
+  hrs" set the entry to 1.50 (5:00–6:30); reversing the TEST COACH 2 sub restored TEST COACH
+  (logged as admin remove+add, original marked reversed); reversing a time change after a newer
+  admin change showed "Can't reverse: the time was changed again since…" on screen; "Mark all
+  reviewed" released the entry into Payment Due (TEST COACH 1.50 hrs, "No rate" — no Town
+  Session rate on file) and into Zoho's missing-rate list.
+- 23 unit tests (`npm test`), incl. 4 for the hold.
+- **Test data still in place (delete at end of R2):** TEST SCHEDULER + 5 Natick rules; TEST
+  COACH 2 roster row + its Auth user; events "R2A TEST …"/"R2B TEST …" and their assignments and
+  `schedule_changes` rows; the TEST COACH entry "R2B TEST past"; the approved "R2B TEST swap".

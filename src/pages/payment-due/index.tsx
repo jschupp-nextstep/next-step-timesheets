@@ -11,6 +11,7 @@ import { useAppSettings } from '../../utility/appSettings'
 import {
   formatRange,
   isPreCutoverExcluded,
+  useHeldEventIds,
   partitionPendingEntries,
   usePayrollRange,
   type CutoverResolution,
@@ -27,6 +28,7 @@ type EntryRow = {
   status: 'pending' | 'paid'
   admin_entered: boolean
   cutover_resolution: CutoverResolution | null
+  event_id: string | null
   coaches: { name: string } | null
   programs: { name: string; entry_mode: string } | null
 }
@@ -52,6 +54,7 @@ export const PaymentDue = () => {
 
   const { cutoverDate, paidThroughDate, isLoading: settingsLoading, refetch: refetchSettings } = useAppSettings()
   const { range, setRange, queryString } = usePayrollRange(paidThroughDate, cutoverDate)
+  const { heldEventIds, isLoading: heldLoading, refetch: refetchHeld } = useHeldEventIds()
 
   // Pending: fetch every pending entry and partition client-side, so
   // entries outside the chosen range (or before cutover) can be counted and
@@ -91,18 +94,19 @@ export const PaymentDue = () => {
 
   // Paid history is already range-filtered server-side; only the pre-cutover
   // exclusion applies there.
-  const { entries, preCutover, beforeRange, afterRange } = useMemo(() => {
+  const { entries, held, preCutover, beforeRange, afterRange } = useMemo(() => {
     if (statusFilter === 'paid') {
       return {
         entries: allEntries.filter((e) => !isPreCutoverExcluded(e, cutoverDate)),
+        held: [],
         preCutover: [],
         beforeRange: [],
         afterRange: [],
       }
     }
-    const { payable, ...rest } = partitionPendingEntries(allEntries, range, cutoverDate)
+    const { payable, ...rest } = partitionPendingEntries(allEntries, range, cutoverDate, heldEventIds)
     return { entries: payable, ...rest }
-  }, [allEntries, range, cutoverDate, statusFilter])
+  }, [allEntries, range, cutoverDate, statusFilter, heldEventIds])
 
   const ratesByCoachProgram = useMemo(
     () => new Map((ratesResult?.data ?? []).map((r) => [`${r.coach_id}|${r.program_id}`, r])),
@@ -168,8 +172,10 @@ export const PaymentDue = () => {
   // since that coach's entries would otherwise fall out of the next
   // default range.
   const maybeAdvancePaidThrough = async (justPaidIds: string[]) => {
+    // Held entries count as unpaid in the range too -- advancing past them
+    // would drop them out of the next default range.
     const remaining = entries.filter((e) => !justPaidIds.includes(e.id))
-    if (remaining.length > 0) return
+    if (remaining.length > 0 || held.length > 0) return
     const end = range[1].format('YYYY-MM-DD')
     if (paidThroughDate && paidThroughDate >= end) return
     const { error } = await supabaseClient
@@ -187,15 +193,21 @@ export const PaymentDue = () => {
   const markPaid = async (row: CoachSummaryRow) => {
     setMarkingCoachId(row.coachId)
     try {
-      const { error } = await supabaseClient
+      let update = supabaseClient
         .from('timesheet_entries')
         .update({ status: 'paid', paid_date: dayjs().format('YYYY-MM-DD') })
         .in('id', row.entryIds)
         // Belt and braces: even if entryIds were somehow wrong, nothing
-        // outside the selected range or already paid can be touched.
+        // outside the selected range or already paid can be touched...
         .eq('status', 'pending')
         .gte('entry_date', range[0].format('YYYY-MM-DD'))
         .lte('entry_date', range[1].format('YYYY-MM-DD'))
+      // ...nor anything on an event with a schedule change awaiting review.
+      // Off-calendar entries (event_id NULL) stay eligible, hence is.null.
+      if (heldEventIds.size > 0) {
+        update = update.or(`event_id.is.null,event_id.not.in.(${[...heldEventIds].join(',')})`)
+      }
+      const { error } = await update
       if (error) {
         message.error(`Couldn't mark as paid: ${error.message}`)
         return
@@ -370,7 +382,30 @@ export const PaymentDue = () => {
         />
       )}
 
-      <Card size="small" loading={query.isLoading || settingsLoading}>
+      {statusFilter === 'pending' && held.length > 0 && (
+        <Alert
+          style={{ marginBottom: 16 }}
+          type="warning"
+          showIcon
+          message={`${held.length} ${held.length === 1 ? 'entry is' : 'entries are'} held for schedule review and not included below.`}
+          description={
+            <>
+              Their session had a scheduler change (a sub, removal, time change…) that hasn't been reviewed yet:{' '}
+              {held
+                .map((e) => `${e.coaches?.name ?? '?'} ${dayjs(e.entry_date).format('M/D')}`)
+                .join(', ')}
+              . Review it in <Link to="/reconciliation">Reconciliation → Schedule changes</Link>, and they'll appear here.
+            </>
+          }
+          action={
+            <Button size="small" onClick={() => refetchHeld()}>
+              Refresh
+            </Button>
+          }
+        />
+      )}
+
+      <Card size="small" loading={query.isLoading || settingsLoading || heldLoading}>
         <Table<CoachSummaryRow>
           dataSource={summaryRows}
           columns={columns}

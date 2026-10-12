@@ -6,6 +6,7 @@ import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
 import { resolveEventHours } from '../../utils/hours'
 import { useScheduleAction } from '../../utility/scheduleActions'
+import { ScheduleChangesCard } from './ScheduleChangesCard'
 
 type EventRef = {
   id: string
@@ -444,6 +445,8 @@ export const Reconciliation = () => {
         records exist -- programs Sprocket doesn't track staff for (e.g. Annual Program) pass
         through unflagged, since there's nothing to check them against.
       </Typography.Paragraph>
+
+      <ScheduleChangesCard onReviewed={() => query.refetch()} />
 
       {oversightCandidates.length > 0 && (
         <Card

@@ -6,7 +6,7 @@ import dayjs from 'dayjs'
 
 import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
 import { useAppSettings } from '../../utility/appSettings'
-import { isPreCutoverExcluded, usePayrollRange, type CutoverResolution } from '../../utility/payrollFilters'
+import { isPreCutoverExcluded, useHeldEventIds, usePayrollRange, type CutoverResolution } from '../../utility/payrollFilters'
 
 type EntryRow = {
   id: string
@@ -19,6 +19,7 @@ type EntryRow = {
   status: 'pending' | 'paid'
   admin_entered: boolean
   cutover_resolution: CutoverResolution | null
+  event_id: string | null
   coaches: { name: string; pay_type: '1099' | 'w2' } | null
   programs: { name: string; entry_mode: string } | null
 }
@@ -93,6 +94,7 @@ export const ZohoExport = () => {
   const { message } = App.useApp()
   const { cutoverDate, paidThroughDate, isLoading: settingsLoading } = useAppSettings()
   const { range, setRange, queryString } = usePayrollRange(paidThroughDate, cutoverDate)
+  const { heldEventIds } = useHeldEventIds()
 
   const { result, query } = useList<EntryRow>({
     resource: 'timesheet_entries',
@@ -105,11 +107,14 @@ export const ZohoExport = () => {
     pagination: { pageSize: 2000 },
     queryOptions: { enabled: !settingsLoading },
   })
-  // Same exclusion Payment Due applies -- pre-cutover entries were paid in
-  // Sheets unless an admin entered them here.
+  // Same exclusions Payment Due applies: pre-cutover entries (paid in Sheets
+  // unless an admin entered them) and entries held for schedule review.
   const payableEntries = useMemo(
-    () => (result?.data ?? []).filter((e) => !isPreCutoverExcluded(e, cutoverDate)),
-    [result?.data, cutoverDate],
+    () =>
+      (result?.data ?? []).filter(
+        (e) => !isPreCutoverExcluded(e, cutoverDate) && !(e.event_id && heldEventIds.has(e.event_id)),
+      ),
+    [result?.data, cutoverDate, heldEventIds],
   )
   const { result: ratesResult } = useList<RateRow>({
     resource: 'rates',

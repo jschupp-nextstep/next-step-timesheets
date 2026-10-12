@@ -92,3 +92,34 @@ describe('Mark all paid scope (payable partition)', () => {
     expect(new Set(all.map((e) => e.id)).size).toBe(5)
   })
 })
+
+describe('payroll hold (held partition)', () => {
+  const r = range('2026-10-07', '2026-10-20')
+  const onChanged = { ...entry('2026-10-09'), event_id: 'changed' }
+  const onChangedAdmin = { ...entry('2026-10-10', { admin_entered: true }), event_id: 'changed' }
+  const onOther = { ...entry('2026-10-09'), event_id: 'other' }
+  const offCalendar = { ...entry('2026-10-09'), event_id: null }
+  const changedButAfter = { ...entry('2026-10-25'), event_id: 'changed' }
+  const held = new Set(['changed'])
+  const result = partitionPendingEntries([onChanged, onChangedAdmin, onOther, offCalendar, changedButAfter], r, CUTOVER, held)
+
+  it('holds every in-range entry on an event with an unreviewed change, admin-entered or not', () => {
+    expect(result.held.map((e) => e.id)).toEqual([onChanged.id, onChangedAdmin.id])
+  })
+
+  it('never lets a held entry into the payable bucket ("Mark all paid" scope)', () => {
+    const payableIds = new Set(result.payable.map((e) => e.id))
+    for (const e of result.held) expect(payableIds.has(e.id)).toBe(false)
+    expect(result.payable.map((e) => e.id)).toEqual([onOther.id, offCalendar.id])
+  })
+
+  it('leaves out-of-range entries in their range buckets even if their event is held', () => {
+    expect(result.afterRange).toEqual([changedButAfter])
+  })
+
+  it('holds nothing once the change is reviewed (event no longer in the held set)', () => {
+    const reviewed = partitionPendingEntries([onChanged, onChangedAdmin], r, CUTOVER, new Set())
+    expect(reviewed.held).toEqual([])
+    expect(reviewed.payable).toHaveLength(2)
+  })
+})

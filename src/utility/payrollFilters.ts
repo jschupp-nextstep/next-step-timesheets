@@ -5,6 +5,7 @@
 // the export did).
 
 import { useMemo } from 'react'
+import { useList } from '@refinedev/core'
 import { useSearchParams } from 'react-router'
 import dayjs, { type Dayjs } from 'dayjs'
 
@@ -30,25 +31,42 @@ export function isPreCutoverExcluded(entry: PayrollFilterEntry, cutoverDate: str
 
 // Splits pending entries for Payment Due: `payable` is exactly what the
 // table shows and what "Mark all paid" may touch; `preCutover` is exactly
-// what the cleanup card lists. The two never overlap, and nothing dated on
-// or after cutover can ever land in `preCutover`.
-export function partitionPendingEntries<T extends PayrollFilterEntry>(
+// what the cleanup card lists; `held` is in-range entries on an event with
+// a schedule change still awaiting review (R2c payroll hold). Every entry
+// lands in exactly one bucket, and nothing dated on or after cutover can
+// ever land in `preCutover`.
+export function partitionPendingEntries<T extends PayrollFilterEntry & { event_id?: string | null }>(
   entries: T[],
   range: PayrollRange,
   cutoverDate: string | null,
+  heldEventIds: ReadonlySet<string> = new Set(),
 ) {
   const payable: T[] = []
+  const held: T[] = []
   const preCutover: T[] = []
   const beforeRange: T[] = []
   const afterRange: T[] = []
   const start = range[0].format('YYYY-MM-DD')
   for (const entry of entries) {
     if (isPreCutoverExcluded(entry, cutoverDate)) preCutover.push(entry)
-    else if (inRange(entry.entry_date, range)) payable.push(entry)
-    else if (entry.entry_date < start) beforeRange.push(entry)
-    else afterRange.push(entry)
+    else if (!inRange(entry.entry_date, range)) (entry.entry_date < start ? beforeRange : afterRange).push(entry)
+    else if (entry.event_id && heldEventIds.has(entry.event_id)) held.push(entry)
+    else payable.push(entry)
   }
-  return { payable, preCutover, beforeRange, afterRange }
+  return { payable, held, preCutover, beforeRange, afterRange }
+}
+
+// Events with at least one scheduler change still awaiting review -- their
+// entries are held out of Payment Due and the Zoho export until reviewed.
+export function useHeldEventIds() {
+  const { result, query } = useList<{ event_id: string }>({
+    resource: 'schedule_changes',
+    meta: { select: 'event_id' },
+    filters: [{ field: 'review_status', operator: 'eq', value: 'needs_review' }],
+    pagination: { pageSize: 2000 },
+  })
+  const heldEventIds = useMemo(() => new Set((result?.data ?? []).map((r) => r.event_id)), [result?.data])
+  return { heldEventIds, isLoading: query.isLoading, refetch: query.refetch }
 }
 
 // "Since last payroll": the day after paid_through_date through today. Falls
