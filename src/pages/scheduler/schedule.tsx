@@ -35,9 +35,11 @@ export const Schedule = () => {
   const [weekStart, setWeekStart] = useState(() => dayjs().startOf('day'))
   const weekEnd = weekStart.add(6, 'day')
 
+  // Coach names come from coach_directory (names only), not coaches --
+  // schedulers can't read the coaches table since 0018_tighten_reads.sql.
   const { result, query } = useList<EventRow>({
     resource: 'events',
-    meta: { select: '*, programs(name), locations(name), event_assignments(id, coach_id, coaches(name))' },
+    meta: { select: '*, programs(name), locations(name), event_assignments(id, coach_id, coaches:coach_directory(name))' },
     filters: [
       { field: 'in_my_scope', operator: 'eq', value: true },
       { field: 'event_date', operator: 'gte', value: weekStart.format('YYYY-MM-DD') },
@@ -51,7 +53,7 @@ export const Schedule = () => {
   })
   const { result: scopesResult } = useList<ScopeRow>({
     resource: 'scheduler_scopes',
-    meta: { select: 'id, programs(name), locations(name), coaches(name)' },
+    meta: { select: 'id, programs(name), locations(name), coaches:coach_directory(name)' },
     pagination: { pageSize: 100 },
   })
 

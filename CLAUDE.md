@@ -209,7 +209,7 @@ hours. Justin has full summer runway, not a tight 2–3 week window.
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0017`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0019`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -718,3 +718,35 @@ Decisions made with Justin:
 - Go-live (separate step, per Justin): locations, fall events via bulk import, coach logins,
   SMTP — and **reset the cutover date to the go-live date, with Paid through set to the day
   before**, in Settings.
+
+**Access audit + read tightening (2026-10-12, `0018_tighten_reads.sql`, `0019_grant_hygiene.sql`):**
+Done before R2b gives schedulers write access. Audited against a live dump of `pg_policies` and
+grants (no drift from the migration files was found).
+- `coaches` had been readable in full by any signed-in user since Phase 2 — every coach and
+  scheduler could read every coach's `email` and `pay_type`. Now: admins read all rows, a coach
+  reads only their own. Non-admin screens get names from the **`coach_directory` view** (id, name,
+  initials, is_active): admins and schedulers see everyone, a coach only themselves, anon nothing.
+  It's a non-`security_invoker` view (bypasses `coaches` RLS; its own WHERE restricts), which
+  Supabase's Security Advisor reports as an ERROR-level `security_definer_view` — **expected and
+  accepted**; it was the only advisor finding. Embed it with an alias to keep shapes:
+  `coaches:coach_directory(name)`.
+- Reference tables (programs, locations, events, pay_periods, app_settings) changed from
+  "anyone signed in" to `has_app_role()` (admin, scheduler, or coach) — a login on no roster now
+  reads nothing.
+- `anon` holds no table privileges and can't execute our functions (Postgres grants EXECUTE to
+  PUBLIC by default; revoked by name, granted to `authenticated`).
+- `authenticated` lost TRUNCATE/TRIGGER/REFERENCES everywhere (TRUNCATE bypasses RLS; not
+  reachable via PostgREST, but nothing needs it).
+- Who can read/write what, as of 0019: reference tables — everyone with a role reads, admin
+  writes; `coaches` — admin all, coach own row; rates/1v1 rates/oversight/admins — admin only;
+  entries/claims/swaps — admin all, coach own rows only (writes as described in earlier
+  sections); `event_assignments` — admin all, scheduler in-scope read, coach own read +
+  `coach_confirmed_at` update; schedulers/scopes — admin all, scheduler own read.
+- Verified live as anon (every table/view/function: permission denied), scheduler (0 coaches
+  rows, directory names-only, `email` column doesn't exist on it), TEST COACH (own coach row and
+  own name only; 0 rows of another coach's entry/claim/swap created for the test; 0 rates), and
+  admin (full counts; Coaches, Payment Due, Zoho, Reconciliation, Board, Schedulers, Entries,
+  Events, Rates, Settings all load with no failed requests).
+- **Open question for Justin:** `current_coach_id()` ignores `coaches.is_active`, so a
+  deactivated coach can still sign in and log sessions. One-line fix, but should a deactivated
+  coach still see their paid history?
