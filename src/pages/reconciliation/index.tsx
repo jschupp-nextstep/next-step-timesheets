@@ -132,6 +132,8 @@ export const Reconciliation = () => {
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [decidingSwapId, setDecidingSwapId] = useState<string | null>(null)
+  const [approvingSwap, setApprovingSwap] = useState<SwapRequestRow | null>(null)
+  const [swapReplacementId, setSwapReplacementId] = useState<string | undefined>()
   const [decidingClaimId, setDecidingClaimId] = useState<string | null>(null)
   const [claimTypeFilter, setClaimTypeFilter] = useState<'all' | PaymentClaimAdminRow['claim_type']>('all')
   const [unstructuredModalClaim, setUnstructuredModalClaim] = useState<PaymentClaimAdminRow | null>(null)
@@ -277,21 +279,28 @@ export const Reconciliation = () => {
     }
   }
 
-  const decideSwap = async (request: SwapRequestRow, decision: 'approved' | 'denied') => {
+  // Approval with a replacement runs schedule_sub in one step, so the
+  // replacement is marked as covering for the requester (R5 reads that);
+  // without one it's a plain logged removal and the event is left unfilled.
+  const decideSwap = async (request: SwapRequestRow, decision: 'approved' | 'denied', replacementCoachId?: string) => {
     setDecidingSwapId(request.id)
     try {
       if (decision === 'approved') {
         // Through the logged function, so the removal shows in the event's
         // history. Its error (if any) is shown by useScheduleAction.
-        const removed = await runSchedule(
-          'schedule_remove',
-          {
-            p_event_id: request.event_id,
-            p_coach_id: request.coach_id,
-            p_reason: `Swap request approved${request.reason ? `: ${request.reason}` : ''}`,
-          },
-          null,
-        )
+        const reason = `Swap request approved${request.reason ? `: ${request.reason}` : ''}`
+        const removed = replacementCoachId
+          ? await runSchedule(
+              'schedule_sub',
+              {
+                p_event_id: request.event_id,
+                p_out_coach_id: request.coach_id,
+                p_in_coach_id: replacementCoachId,
+                p_reason: reason,
+              },
+              null,
+            )
+          : await runSchedule('schedule_remove', { p_event_id: request.event_id, p_coach_id: request.coach_id, p_reason: reason }, null)
         if (!removed) return
       }
 
@@ -303,7 +312,15 @@ export const Reconciliation = () => {
         message.error(`Couldn't save the decision: ${error.message}`)
         return
       }
-      message.success(decision === 'approved' ? 'Swap approved -- coach removed from the assignment' : 'Swap denied')
+      message.success(
+        decision === 'denied'
+          ? 'Swap denied'
+          : replacementCoachId
+            ? `Swap approved -- ${coachesById.get(replacementCoachId)?.name ?? 'the replacement'} is covering`
+            : 'Swap approved -- coach removed; the session is now unfilled',
+      )
+      setApprovingSwap(null)
+      setSwapReplacementId(undefined)
       swapRequestsQuery.refetch()
     } finally {
       setDecidingSwapId(null)
@@ -525,9 +542,12 @@ export const Reconciliation = () => {
                     size="small"
                     type="primary"
                     loading={decidingSwapId === row.id}
-                    onClick={() => decideSwap(row, 'approved')}
+                    onClick={() => {
+                      setSwapReplacementId(undefined)
+                      setApprovingSwap(row)
+                    }}
                   >
-                    Approve
+                    Approve…
                   </Button>
                   <Button size="small" loading={decidingSwapId === row.id} onClick={() => decideSwap(row, 'denied')}>
                     Deny
@@ -538,6 +558,40 @@ export const Reconciliation = () => {
           </Table>
         </Card>
       )}
+
+      <Modal
+        open={!!approvingSwap}
+        title="Approve swap request"
+        okText={swapReplacementId ? 'Approve and assign replacement' : 'Approve (leave unfilled)'}
+        okButtonProps={{ loading: !!approvingSwap && decidingSwapId === approvingSwap.id }}
+        onOk={() => approvingSwap && decideSwap(approvingSwap, 'approved', swapReplacementId)}
+        onCancel={() => setApprovingSwap(null)}
+        destroyOnHidden
+      >
+        {approvingSwap && (
+          <Typography.Paragraph>
+            Removes <strong>{coachesById.get(approvingSwap.coach_id)?.name ?? 'the coach'}</strong> from{' '}
+            {approvingSwap.events?.event_date} {approvingSwap.events?.programs?.name}
+            {approvingSwap.events?.session_name ? ` (${approvingSwap.events.session_name})` : ''}.
+          </Typography.Paragraph>
+        )}
+        <Typography.Text>Replacement (optional)</Typography.Text>
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          placeholder="Leave empty to just remove them"
+          style={{ width: '100%', marginTop: 4 }}
+          value={swapReplacementId}
+          onChange={setSwapReplacementId}
+          options={(coachesResult?.data ?? [])
+            .filter((c) => c.id !== approvingSwap?.coach_id)
+            .map((c) => ({ label: c.name, value: c.id }))}
+        />
+        <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+          A replacement is recorded as covering for them, in one step, in the session's history.
+        </Typography.Paragraph>
+      </Modal>
 
       {claims.length > 0 && (
         <Card

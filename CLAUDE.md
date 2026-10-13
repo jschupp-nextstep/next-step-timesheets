@@ -185,7 +185,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2a (roles), R2b (logged quick actions), R2c (review queue + payroll hold) done 2026-10-12; R2d and R3–R9 not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3–R9 not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -362,7 +362,9 @@ Two distinct actions on `/my-sessions`, for assigned events:
   anti-join, since status is stored directly here instead of inferred from row absence). Approval
   removes the coach from `event_assignments` — the event becomes unfilled again and gets refilled
   through the same board assign flow, no separate reassignment logic. Denial just marks the
-  request resolved (`status = 'denied'`), no other change.
+  request resolved (`status = 'denied'`), no other change. *(Updated in R2: removal now goes
+  through the logged `schedule_remove`, and since R2d approval can also name a replacement,
+  which runs `schedule_sub` in the same step — see "R2d" below.)*
 
 ### RLS — designed deliberately for this feature, not copy-pasted
 - `event_assignments`: migration `0004` already grants blanket `select, insert, update, delete` on
@@ -849,3 +851,20 @@ grants (no drift from the migration files was found).
 - **Test data still in place (delete at end of R2):** TEST SCHEDULER + 5 Natick rules; TEST
   COACH 2 roster row + its Auth user; events "R2A TEST …"/"R2B TEST …" and their assignments and
   `schedule_changes` rows; the TEST COACH entry "R2B TEST past"; the approved "R2B TEST swap".
+
+**R2d done (2026-10-13, no migration):**
+- Swap approval (Reconciliation → Swap requests → "Approve…") opens a dialog with an optional
+  replacement coach. With one, approval runs `schedule_sub` (replacement assigned, marked
+  `covering_for_coach_id` = requester, one logged admin change, already reviewed); without one,
+  the plain logged `schedule_remove` from R2b and the session is left unfilled.
+- Source tagging (`sprocket`/`bulk`/`manual`/`legacy`) and the revised Sprocket re-import policy
+  were already done in R2b; the importer upgrade that *uses* them is still blocked on Sprocket's
+  bulk-import template.
+- Verified live: an admin-filed swap request for TEST COACH on a Natick test session, approved
+  with TEST COACH 2 as replacement → request approved, TEST COACH 2 assigned covering for TEST
+  COACH, history row "sub — Swap request approved: …" (admin, reviewed).
+- Found while checking test data: TEST COACH carried a $100/hr Camp-Full Day rate (from earlier
+  testing), which would have made its two July Camp-Full Day test entries payable ($600 each) if
+  ever marked "Still owed". The end-of-R2 cleanup deletes all TEST COACH rates and deactivates
+  TEST COACH (kept as Justin's standing test login — sign-in ignores `is_active`; see the open
+  question above), and deletes TEST COACH 2, the test scheduler, and all "R2A/R2B TEST" data.
