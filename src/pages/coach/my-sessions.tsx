@@ -85,6 +85,8 @@ type TimesheetEntryRow = {
   end_time: string | null
   hours: number | null
   flat_amount: number | null
+  paid_rate: number | null
+  paid_amount: number | null
   session_name: string | null
   notes: string | null
   status: 'pending' | 'paid'
@@ -518,7 +520,18 @@ export const MySessions = () => {
                 title="Hours"
                 render={(_, row: TimesheetEntryRow) => (row.hours != null ? row.hours.toFixed(2) : '—')}
               />
-              <Table.Column title="Amount" render={(_, row: TimesheetEntryRow) => formatAmount(row)} />
+              <Table.Column
+                title="Rate"
+                render={(_, row: TimesheetEntryRow) => (row.paid_rate != null ? `$${row.paid_rate.toFixed(2)}/hr` : '—')}
+              />
+              <Table.Column
+                title="Amount"
+                render={(_, row: TimesheetEntryRow) =>
+                  // What was actually paid, saved at payment (R8); older
+                  // entries fall back to the flat amount, if any.
+                  row.paid_amount != null ? `$${row.paid_amount.toFixed(2)}` : formatAmount(row)
+                }
+              />
               <Table.Column
                 title="Paid"
                 width={110}

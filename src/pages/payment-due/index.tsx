@@ -6,7 +6,7 @@ import dayjs from 'dayjs'
 import { Link } from 'react-router'
 
 import { supabaseClient } from '../../utility/supabaseClient'
-import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
+import { computeAmount, type OneVOneRateRow, type PaidRateBasis, type RateRow } from '../../utility/payroll'
 import { useAppSettings } from '../../utility/appSettings'
 import {
   formatRange,
@@ -29,13 +29,19 @@ type EntryRow = {
   admin_entered: boolean
   cutover_resolution: CutoverResolution | null
   event_id: string | null
+  paid_rate: number | null
+  paid_amount: number | null
+  paid_rate_basis: PaidRateBasis | null
   coaches: { name: string } | null
   programs: { name: string; entry_mode: string } | null
 }
 
 type ProgramRow = { id: string; name: string }
 
-type Cell = { hours: number | null; amount: number; missingRate: boolean }
+// fallback: some amount here used the coach's Coaching rate (pending) or
+// was paid at it (paid history). unrecorded: a paid entry from before R8,
+// with no saved amount -- shown as such, never recomputed from today's rates.
+type Cell = { hours: number | null; amount: number; missingRate: boolean; fallback: boolean; unrecorded: boolean }
 
 type CoachSummaryRow = {
   coachId: string
@@ -151,19 +157,34 @@ export const PaymentDue = () => {
         })
       }
       const row = byCoach.get(entry.coach_id)!
-      const { amount, missingRate } = computeAmount(entry, ratesByCoachProgram, coachingProgramId, oneVOneByCoach)
-      const existing = row.byProgram.get(entry.program_id) ?? { hours: null, amount: 0, missingRate: false }
+      // Paid history shows what was actually saved at payment (R8); only
+      // pending entries are priced from current rates.
+      const isPaid = statusFilter === 'paid'
+      const computed = isPaid ? null : computeAmount(entry, ratesByCoachProgram, coachingProgramId, oneVOneByCoach)
+      const amount = isPaid ? (entry.paid_amount ?? 0) : computed!.amount
+      const missingRate = isPaid ? false : computed!.missingRate
+      const fallback = (isPaid ? entry.paid_rate_basis : computed!.basis) === 'coaching_fallback'
+      const unrecorded = isPaid && entry.paid_amount == null
+      const existing = row.byProgram.get(entry.program_id) ?? {
+        hours: null,
+        amount: 0,
+        missingRate: false,
+        fallback: false,
+        unrecorded: false,
+      }
       row.byProgram.set(entry.program_id, {
         hours: entry.hours != null ? (existing.hours ?? 0) + entry.hours : existing.hours,
         amount: existing.amount + amount,
         missingRate: existing.missingRate || missingRate,
+        fallback: existing.fallback || fallback,
+        unrecorded: existing.unrecorded || unrecorded,
       })
       row.total += amount
       row.hasMissingRate = row.hasMissingRate || missingRate
       row.entryIds.push(entry.id)
     }
     return Array.from(byCoach.values()).sort((a, b) => a.coachName.localeCompare(b.coachName))
-  }, [entries, ratesByCoachProgram, coachingProgramId, oneVOneByCoach])
+  }, [entries, ratesByCoachProgram, coachingProgramId, oneVOneByCoach, statusFilter])
 
   // Once every payable entry in the range is paid, that range is done --
   // advance paid_through_date so next time Payment Due opens on the next
@@ -193,21 +214,21 @@ export const PaymentDue = () => {
   const markPaid = async (row: CoachSummaryRow) => {
     setMarkingCoachId(row.coachId)
     try {
-      let update = supabaseClient
-        .from('timesheet_entries')
-        .update({ status: 'paid', paid_date: dayjs().format('YYYY-MM-DD') })
-        .in('id', row.entryIds)
-        // Belt and braces: even if entryIds were somehow wrong, nothing
-        // outside the selected range or already paid can be touched...
-        .eq('status', 'pending')
-        .gte('entry_date', range[0].format('YYYY-MM-DD'))
-        .lte('entry_date', range[1].format('YYYY-MM-DD'))
-      // ...nor anything on an event with a schedule change awaiting review.
-      // Off-calendar entries (event_id NULL) stay eligible, hence is.null.
-      if (heldEventIds.size > 0) {
-        update = update.or(`event_id.is.null,event_id.not.in.(${[...heldEventIds].join(',')})`)
-      }
-      const { error } = await update
+      // R8: save each entry's rate/amount/basis -- the same numbers shown in
+      // the table -- via mark_entries_paid (all-or-nothing; it also re-checks
+      // pending, range, and the schedule-review hold server-side).
+      const rows = entries
+        .filter((e) => row.entryIds.includes(e.id))
+        .map((e) => {
+          const r = computeAmount(e, ratesByCoachProgram, coachingProgramId, oneVOneByCoach)
+          return { id: e.id, paid_rate: r.rate, paid_amount: r.amount, paid_rate_basis: r.basis }
+        })
+      const { error } = await supabaseClient.rpc('mark_entries_paid', {
+        p_rows: rows,
+        p_paid_date: dayjs().format('YYYY-MM-DD'),
+        p_range_start: range[0].format('YYYY-MM-DD'),
+        p_range_end: range[1].format('YYYY-MM-DD'),
+      })
       if (error) {
         message.error(`Couldn't mark as paid: ${error.message}`)
         return
@@ -287,7 +308,20 @@ export const PaymentDue = () => {
             render: (_, row) => {
               const cell = row.byProgram.get(program.id)
               if (!cell) return '—'
-              return cell.missingRate ? <Tag color="red">No rate</Tag> : `$${cell.amount.toFixed(2)}`
+              if (cell.missingRate) return <Tag color="red">No rate</Tag>
+              return (
+                <Space direction="vertical" size={0} align="end">
+                  <span>${cell.amount.toFixed(2)}</span>
+                  {cell.fallback && (
+                    <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                      Coaching rate
+                    </Tag>
+                  )}
+                  {cell.unrecorded && (
+                    <Tag style={{ marginInlineEnd: 0 }}>{cell.amount > 0 ? 'Partly not recorded' : 'Not recorded'}</Tag>
+                  )}
+                </Space>
+              )
             },
           },
         ],
@@ -328,7 +362,9 @@ export const PaymentDue = () => {
         Aggregated by coach, one Hours/$ column pair per program, for the dates selected below. A
         coach+program combination with no rate on file shows "No rate" instead of a silent $0 -- add
         the missing rate before marking that coach paid (the button disables until every cell
-        resolves).
+        resolves). "Coaching rate" means the coach has no rate for that program and their Coaching rate is
+        being used -- check it's right before paying. Paid history shows the amounts saved when each
+        entry was paid; entries paid before amounts were recorded show "Not recorded".
       </Typography.Paragraph>
 
       <Space style={{ marginBottom: 16 }} wrap>

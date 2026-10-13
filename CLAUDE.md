@@ -188,7 +188,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 (minimal) next; R4–R7, R9 not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4–R7, R9 and the rest of R8 (rate effective dates, adjustments) not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -227,7 +227,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0022`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0024`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -602,11 +602,10 @@ doc didn't know about, worth remembering when building the rest:
   cancelled-not-paid all need the same thing — **build one shared "payable" predicate** in
   `src/utility/payrollFilters.ts` (where `isPreCutoverExcluded` already lives) rather than three
   separate filters.
-- **Paid history is recomputed from current rates.** `computeAmount` runs at render time for paid
-  entries too, so a rate change today rewrites what already-paid entries display (R8 — worse than
-  "unpaid entries change value").
-- **The Coaching-rate fallback is silent** in Payment Due (`payroll.ts`) — Justin wants it visible
-  ("probably Coaching, but ask me").
+- ~~**Paid history is recomputed from current rates.**~~ Fixed by R8 (minimal), 2026-10-13 — paid
+  entries now carry their own saved amount.
+- ~~**The Coaching-rate fallback is silent**~~ — fixed in R8 (minimal): an orange "Coaching rate"
+  tag in Payment Due, and `paid_rate_basis = 'coaching_fallback'` saved on the entry.
 - **Sprocket's `ArrivalTime` column isn't parsed at all** (R3).
 - Schedule Board and swap approval **delete** `event_assignments` rows — no history survives (R2).
 
@@ -773,9 +772,9 @@ grants (no drift from the migration files was found).
   own name only; 0 rows of another coach's entry/claim/swap created for the test; 0 rates), and
   admin (full counts; Coaches, Payment Due, Zoho, Reconciliation, Board, Schedulers, Entries,
   Events, Rates, Settings all load with no failed requests).
-- **Open question for Justin:** `current_coach_id()` ignores `coaches.is_active`, so a
-  deactivated coach can still sign in and log sessions. One-line fix, but should a deactivated
-  coach still see their paid history?
+- ~~**Open question for Justin:** should a deactivated coach still sign in?~~ **Decided
+  2026-10-13:** yes, read-only — they keep sign-in and history, but RLS refuses their writes
+  (`coach_is_active()`, done in R3's `0023`).
 
 **R2b done (2026-10-12, `0020_schedule_changes.sql`, `0021_create_event_check_order.sql`):**
 - `schedule_changes`: append-only history (create/sub/add/remove/time/cancel/restore, removed/added
@@ -920,3 +919,42 @@ Sargent 9v9) are real data and were kept.
   hours on three Oct 12 test sessions: AP 5:30–6:30 → **1.25** (entry 17:15–18:30), game 10:00–11:00
   with 30-min warm-up → **1.50** (09:30–11:00), Town Session practice 5:00–6:00 → **1.00**. Needed a
   temporary Oct 5–18 pay period (the table is empty — see the go-live list).
+
+### Done: R8 minimal — paid rate/amount saved at payment (2026-10-13, `0024_paid_amounts.sql`)
+
+- `timesheet_entries` gained `paid_rate` (hourly; null for flat/1v1), `paid_amount`, and
+  `paid_rate_basis` (`exact` / `coaching_fallback` / `flat` / `one_v_one` / `manual`). Entries paid
+  before this have none of them and show **"Not recorded"** — never a recomputed guess.
+- **Database rule** (`require_paid_amount` trigger): an entry can't become `paid` without
+  `paid_amount`, except `cutover_resolution = 'paid_in_sheets'`. Legacy paid rows without an
+  amount aren't touched, but an amount, once recorded, can't be removed.
+- **`mark_entries_paid(rows, paid_date, range_start, range_end)`** — admin-only, all-or-nothing:
+  every row must still be pending, inside the range, not held for schedule review, and carry an
+  amount, else nothing changes and the count is reported. Payment Due's "Mark all paid" is the
+  only caller; it sends each entry's rate/amount/basis from `computeAmount`, i.e. exactly the
+  numbers on screen.
+- `computeAmount` (`src/utility/payroll.ts`) now also returns `rate` and `basis`; an entry with no
+  hours and no flat amount is now **missing** (blocks payment) rather than a silent $0.
+- Payment Due: orange **"Coaching rate"** tag wherever the fallback applies (pending and paid);
+  Paid history shows saved amounts only. Coach Paid history shows **rate and amount** (Justin:
+  coaches see both on their own paid entries). Admin **Edit Entry**: Status = Paid reveals Paid
+  rate / Paid amount, pre-filled from the lookup (and today's paid date if empty); amount always
+  required, rate only for hourly entries; changing the amount saves basis `manual` ("Set by
+  admin"); Paid in Sheets entries need neither.
+- **Bug fixed in passing:** Edit Entry's inline `queryOptions.select` was re-run every render,
+  which made Refine reset the form — so any edit was wiped the moment something re-rendered it
+  (here, Status → Paid snapped back to Pending). Hoisted to a module-level `toFormValues`.
+  **Same pattern exists in other edit screens** (events, pay periods, settings); harmless today
+  only because nothing else re-renders them mid-edit.
+- **Known gap (rest of R8):** the Zoho export still prices pending entries from current rates at
+  export time; if a rate changes between export and "Mark all paid" they can differ. Rate
+  effective dates and dollar adjustments are also still to do.
+- Tests: 42 (`npm test`), incl. 5 for `computeAmount` basis/rate/rounding.
+- Verified live 2026-10-13 (admin, temporary TEST COACH rates Town $60 / Coaching $40): a direct
+  "set paid" with no amount → refused; `mark_entries_paid` with one out-of-range row → refused,
+  nothing changed; Payment Due showed Futsal $40 with the "Coaching rate" tag; Mark all paid saved
+  Town 1.5h → $90 `exact`, Futsal 1h → $40 `coaching_fallback`, Reimbursement → $25 `flat`; raising
+  the Town rate to $70 left Paid history at $90; Edit Entry pre-filled $70 / $140 for a 2h entry,
+  and overriding to $130 saved basis `manual`. Test entries/rates deleted, paid-through reset to
+  Oct 6. **Not seen on screen:** the coach Paid history columns (TEST COACH had no paid entries
+  left to show).
