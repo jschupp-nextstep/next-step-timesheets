@@ -848,9 +848,8 @@ grants (no drift from the migration files was found).
   reviewed" released the entry into Payment Due (TEST COACH 1.50 hrs, "No rate" — no Town
   Session rate on file) and into Zoho's missing-rate list.
 - 23 unit tests (`npm test`), incl. 4 for the hold.
-- **Test data still in place (delete at end of R2):** TEST SCHEDULER + 5 Natick rules; TEST
-  COACH 2 roster row + its Auth user; events "R2A TEST …"/"R2B TEST …" and their assignments and
-  `schedule_changes` rows; the TEST COACH entry "R2B TEST past"; the approved "R2B TEST swap".
+- Test data (TEST SCHEDULER, TEST COACH 2, "R2A/R2B TEST" events and everything on them) was
+  removed at the end of R2 — see below.
 
 **R2d done (2026-10-13, no migration):**
 - Swap approval (Reconciliation → Swap requests → "Approve…") opens a dialog with an optional
@@ -868,3 +867,11 @@ grants (no drift from the migration files was found).
   ever marked "Still owed". The end-of-R2 cleanup deletes all TEST COACH rates and deactivates
   TEST COACH (kept as Justin's standing test login — sign-in ignores `is_active`; see the open
   question above), and deletes TEST COACH 2, the test scheduler, and all "R2A/R2B TEST" data.
+
+**R2 closed (2026-10-13).** Cleanup SQL run by Justin; verification query showed 0 test events, 0
+`schedule_changes` rows, 0 test-coach assignments/rates/1v1 rates, 0 schedulers, and 7 remaining
+TEST COACH entries (its July pre-cutover test entries — to be marked "Paid in Sheets" on Payment
+Due). TEST COACH is now `is_active = false` with no rates (still signs in, since
+`current_coach_id()` ignores `is_active`). The `+scheduler`/`+coach` Auth users are deleted by
+hand in Authentication → Users. The two Natick locations added during R2a (Bennett-Hemenway,
+Sargent 9v9) are real data and were kept.
