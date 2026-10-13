@@ -944,8 +944,10 @@ Sargent 9v9) are real data and were kept.
 - **Bug fixed in passing:** Edit Entry's inline `queryOptions.select` was re-run every render,
   which made Refine reset the form — so any edit was wiped the moment something re-rendered it
   (here, Status → Paid snapped back to Pending). Hoisted to a module-level `toFormValues`.
-  **Same pattern exists in other edit screens** (events, pay periods, settings); harmless today
-  only because nothing else re-renders them mid-edit.
+  The same inline-`select` pattern in the Events, Pay Periods, and Settings edit screens was
+  hoisted the same way on 2026-10-13 (verified: Events and Settings load their values and keep an
+  edit across re-renders). **Rule going forward: never pass an inline `queryOptions.select` to
+  Refine's `useForm`.**
 - **Known gap (rest of R8):** the Zoho export still prices pending entries from current rates at
   export time; if a rate changes between export and "Mark all paid" they can differ. Rate
   effective dates and dollar adjustments are also still to do.

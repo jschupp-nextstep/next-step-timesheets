@@ -1,3 +1,4 @@
+import type { BaseRecord, GetOneResponse } from '@refinedev/core'
 import { Edit, useForm, useSelect } from '@refinedev/antd'
 import { DatePicker, Form, Input, InputNumber, Select, Switch, TimePicker } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -14,20 +15,23 @@ type EventFormValues = {
   paid_early_minutes: number | null
 }
 
+// Defined once, outside the component: an inline `select` is re-run by
+// react-query on every render, handing Refine a "new" record each time and
+// making it reset the form mid-edit (see entries/edit.tsx).
+const toFormValues = (data: GetOneResponse<BaseRecord>) => ({
+  ...data,
+  data: {
+    ...data.data,
+    event_date: data.data.event_date ? dayjs(data.data.event_date) : undefined,
+    start_time: data.data.start_time ? dayjs(data.data.start_time, 'HH:mm:ss') : undefined,
+    end_time: data.data.end_time ? dayjs(data.data.end_time, 'HH:mm:ss') : undefined,
+  },
+})
+
 export const EventEdit = () => {
   const { formProps, saveButtonProps } = useForm({
     resource: 'events',
-    queryOptions: {
-      select: (data) => ({
-        ...data,
-        data: {
-          ...data.data,
-          event_date: data.data.event_date ? dayjs(data.data.event_date) : undefined,
-          start_time: data.data.start_time ? dayjs(data.data.start_time, 'HH:mm:ss') : undefined,
-          end_time: data.data.end_time ? dayjs(data.data.end_time, 'HH:mm:ss') : undefined,
-        },
-      }),
-    },
+    queryOptions: { select: toFormValues },
   })
   const { selectProps: programSelectProps } = useSelect({
     resource: 'programs',

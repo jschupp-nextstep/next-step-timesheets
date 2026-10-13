@@ -1,3 +1,4 @@
+import type { BaseRecord, GetOneResponse } from '@refinedev/core'
 import { Edit, useForm } from '@refinedev/antd'
 import { DatePicker, Form, Typography } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -7,6 +8,18 @@ type SettingsFormValues = {
   paid_through_date: Dayjs | null
 }
 
+// Defined once, outside the component: an inline `select` is re-run by
+// react-query on every render, handing Refine a "new" record each time and
+// making it reset the form mid-edit (see entries/edit.tsx).
+const toFormValues = (data: GetOneResponse<BaseRecord>) => ({
+  ...data,
+  data: {
+    ...data.data,
+    cutover_date: data.data.cutover_date ? dayjs(data.data.cutover_date) : null,
+    paid_through_date: data.data.paid_through_date ? dayjs(data.data.paid_through_date) : null,
+  },
+})
+
 // Single-row app_settings (id = 1) -- see 0015_cutover.sql.
 export const Settings = () => {
   const { formProps, saveButtonProps } = useForm({
@@ -14,16 +27,7 @@ export const Settings = () => {
     action: 'edit',
     id: 1,
     redirect: false,
-    queryOptions: {
-      select: (data) => ({
-        ...data,
-        data: {
-          ...data.data,
-          cutover_date: data.data.cutover_date ? dayjs(data.data.cutover_date) : null,
-          paid_through_date: data.data.paid_through_date ? dayjs(data.data.paid_through_date) : null,
-        },
-      }),
-    },
+    queryOptions: { select: toFormValues },
   })
 
   return (
