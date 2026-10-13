@@ -39,3 +39,6 @@ scripts/generate_real_data_import.py
 *.njsproj
 *.sln
 *.sw?
+
+# Local input files -- read as input, never committed
+Master Calendar.xlsx
