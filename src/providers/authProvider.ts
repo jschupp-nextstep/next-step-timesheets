@@ -7,8 +7,10 @@ import { supabaseClient } from '../utility/supabaseClient'
 // layout can offer the coach screens too.
 export type Identity =
   | { role: 'admin'; id: string; email: string }
-  | { role: 'scheduler'; id: string; email: string; schedulerId: string; name: string; coachId?: string }
-  | { role: 'coach'; id: string; email: string; coachId: string; name: string }
+  | { role: 'scheduler'; id: string; email: string; schedulerId: string; name: string; coachId?: string; coachActive?: boolean }
+  // coachActive false = deactivated: can sign in and read history, but RLS
+  // (0023, coach_is_active()) refuses new/changed entries, claims, swaps.
+  | { role: 'coach'; id: string; email: string; coachId: string; name: string; coachActive: boolean }
   // Signed in, but on no roster -- since 0017, no longer silently an admin.
   | { role: 'none'; id: string; email: string }
 
@@ -92,7 +94,7 @@ export const authProvider: AuthProvider = {
     const [{ data: isAdmin }, { data: scheduler }, { data: coach }] = await Promise.all([
       supabaseClient.rpc('is_admin'),
       supabaseClient.from('schedulers').select('id, name').eq('email', email).eq('is_active', true).maybeSingle(),
-      supabaseClient.from('coaches').select('id, name').eq('email', email).maybeSingle(),
+      supabaseClient.from('coaches').select('id, name, is_active').eq('email', email).maybeSingle(),
     ])
     if (isAdmin) return { role: 'admin', id: data.user.id, email }
     if (scheduler) {
@@ -103,10 +105,11 @@ export const authProvider: AuthProvider = {
         schedulerId: scheduler.id,
         name: scheduler.name,
         coachId: coach?.id,
+        coachActive: coach?.is_active,
       }
     }
     if (coach) {
-      return { role: 'coach', id: data.user.id, email, coachId: coach.id, name: coach.name }
+      return { role: 'coach', id: data.user.id, email, coachId: coach.id, name: coach.name, coachActive: coach.is_active }
     }
     return { role: 'none', id: data.user.id, email }
   },
@@ -116,3 +119,7 @@ export const authProvider: AuthProvider = {
 // who also coaches. Coach-facing pages use this instead of checking role.
 export const coachIdOf = (identity: Identity | undefined): string | undefined =>
   identity?.role === 'coach' || identity?.role === 'scheduler' ? identity.coachId : undefined
+
+// True when this login's coach record is deactivated (read-only coach).
+export const isInactiveCoach = (identity: Identity | undefined): boolean =>
+  !!coachIdOf(identity) && (identity?.role === 'coach' || identity?.role === 'scheduler') && identity.coachActive === false

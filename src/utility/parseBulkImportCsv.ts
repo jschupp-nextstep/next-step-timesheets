@@ -17,6 +17,9 @@ export type BulkImportRow = {
   'End Time': string
   'Session Name': string
   Coaches: string
+  // Optional (R3): when coaches are paid from before the start, e.g. a
+  // game's warm-up. HH:mm, must be before Start Time.
+  'Arrival Time'?: string
 }
 
 export type ParsedBulkEvent = {
@@ -29,6 +32,7 @@ export type ParsedBulkEvent = {
   sessionName: string | null
   coachNames: string[]
   signature: string
+  paidEarlyMinutes: number | null
 }
 
 export type DuplicateRowGroup = {
@@ -88,6 +92,17 @@ export function parseBulkImportCsv(csvText: string): BulkImportParseResult {
     const startTime = parseTime24h(row['Start Time'])
     const endTime = parseTime24h(row['End Time'])
     const sessionName = row['Session Name']?.trim() || null
+
+    let paidEarlyMinutes: number | null = null
+    if (row['Arrival Time']?.trim()) {
+      const arrival = parseTime24h(row['Arrival Time'])
+      const toMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+      if (!arrival || !startTime || toMinutes(arrival) >= toMinutes(startTime)) {
+        errors.push(`Row ${rowNumber}: Arrival Time "${row['Arrival Time']}" must be HH:mm and before Start Time, skipped`)
+        return
+      }
+      paidEarlyMinutes = toMinutes(startTime) - toMinutes(arrival)
+    }
     const coachNames = (row.Coaches ?? '')
       .split(';')
       .map((n) => n.trim())
@@ -109,6 +124,7 @@ export function parseBulkImportCsv(csvText: string): BulkImportParseResult {
       sessionName,
       coachNames,
       signature,
+      paidEarlyMinutes,
     })
   })
 

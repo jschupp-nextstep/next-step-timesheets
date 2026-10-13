@@ -4,7 +4,7 @@ import { App, Button, Card, InputNumber, Modal, Segmented, Select, Space, Table,
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
-import { resolveEventHours } from '../../utils/hours'
+import { paidWindow, resolveEventHours } from '../../utils/hours'
 import { useScheduleAction } from '../../utility/scheduleActions'
 import { ScheduleChangesCard } from './ScheduleChangesCard'
 
@@ -72,8 +72,14 @@ type PaymentClaimAdminRow = {
   notes: string | null
   status: 'pending' | 'approved' | 'denied'
   requested_at: string
-  events: { event_date: string; session_name: string | null; start_time: string | null; end_time: string | null } | null
-  programs: { name: string } | null
+  events: {
+    event_date: string
+    session_name: string | null
+    start_time: string | null
+    end_time: string | null
+    paid_early_minutes: number | null
+  } | null
+  programs: { name: string; paid_early_minutes: number | null } | null
   locations: { name: string; half_day_hours: number | null; full_day_hours: number | null } | null
 }
 
@@ -192,7 +198,7 @@ export const Reconciliation = () => {
     resource: 'payment_claims',
     meta: {
       select:
-        '*, events(event_date, session_name, start_time, end_time), programs(name), locations(name, half_day_hours, full_day_hours)',
+        '*, events(event_date, session_name, start_time, end_time, paid_early_minutes), programs(name, paid_early_minutes), locations(name, half_day_hours, full_day_hours)',
     },
     filters: [{ field: 'status', operator: 'eq', value: 'pending' }],
     sorters: [{ field: 'requested_at', order: 'asc' }],
@@ -342,14 +348,15 @@ export const Reconciliation = () => {
             message.error("Couldn't find the linked event.")
             return
           }
-          const hours = resolveEventHours(claim.programs?.name ?? '', claim.events, claim.locations ?? undefined)
+          const program = claim.programs ?? { name: '', paid_early_minutes: null }
+          const hours = resolveEventHours(program, claim.events, claim.locations ?? undefined)
           const { error: insertError } = await supabaseClient.from('timesheet_entries').insert({
             coach_id: claim.coach_id,
             program_id: claim.program_id,
             event_id: claim.event_id,
             location_id: claim.location_id,
             entry_date: claim.events.event_date,
-            start_time: claim.events.start_time,
+            start_time: paidWindow(program, claim.events).start,
             end_time: claim.events.end_time,
             hours,
             session_name: claim.events.session_name,

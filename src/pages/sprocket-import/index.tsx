@@ -339,6 +339,7 @@ export const SprocketImport = () => {
             end_time: event.endTime,
             session_name: event.sessionName,
             is_cancelled: event.isCancelled,
+            paid_early_minutes: event.paidEarlyMinutes,
           })
           .select('id')
           .single()

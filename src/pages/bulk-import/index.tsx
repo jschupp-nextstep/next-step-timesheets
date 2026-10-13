@@ -230,6 +230,7 @@ export const BulkImport = () => {
             end_time: event.endTime,
             session_name: event.sessionName,
             is_cancelled: false,
+            paid_early_minutes: event.paidEarlyMinutes,
           })
           .select('id')
           .single()
@@ -274,9 +275,10 @@ export const BulkImport = () => {
       <Typography.Title level={3}>Bulk Import Events</Typography.Title>
       <Typography.Paragraph type="secondary">
         Upload a CSV in this app's native format (Program, Location, Date, Start Time, End Time,
-        Session Name, Coaches) to create events and assign coaches directly -- unlike the Sprocket
-        importer, this supports multiple coaches per session natively, for any program, not just
-        Camp.
+        Session Name, Coaches, and optionally Arrival Time) to create events and assign coaches
+        directly -- unlike the Sprocket importer, this supports multiple coaches per session
+        natively, for any program, not just Camp. Arrival Time (HH:mm, before the start) pays
+        coaches from that time, e.g. a game's warm-up; leave it blank for practices.
       </Typography.Paragraph>
 
       <Upload.Dragger beforeUpload={handleFile} accept=".csv" showUploadList={false} maxCount={1}>

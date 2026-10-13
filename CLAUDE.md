@@ -142,8 +142,11 @@ Considered "polish the existing Sheets/Apps Script system with a nicer frontend"
   pattern as `swap_requests` rather than `oversight_approvals`' insert-only shape.
 
 Session codes (TYPE-MMDD-HHMM-INITIALS) were retired entirely, as predicted — the event's own ID
-is the match key. There turned out to be no Sprocket-side stable ID either (its CSV export has no
-ID column), which matters for the Phase 5 work described below.
+is the match key. ~~There turned out to be no Sprocket-side stable ID either (its CSV export has no
+ID column)~~ — **corrected 2026-10-13:** the calendar export *does* have `ClubCalendarEventID`,
+unique on every row of the July export (one per staff row for Camps, one per session otherwise).
+Not yet confirmed stable across re-exports, but if it is, the importer upgrade below can match
+by it instead of by a field signature.
 
 **Coach-facing entry_mode summary** (relevant since it's easy to assume more is covered than is):
 `session` (pick a real calendar event) and `direct_time` (Office Hours: date + start/end time, no
@@ -185,7 +188,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3–R9 not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 (minimal) next; R4–R7, R9 not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -250,9 +253,11 @@ yet made:
   session_name`) bakes mutable fields (time, and implicitly cancellation) into event *identity*.
   That has to be narrowed to just the fields that name *which* event this is (date, location,
   program, session name/title), so a Sprocket-side time correction updates the existing event
-  instead of silently creating a duplicate. Known unavoidable gap: since Sprocket's own export has
+  instead of silently creating a duplicate. ~~Known unavoidable gap: since Sprocket's own export has
   no stable event ID (confirmed by reading its CSV shape), a genuine reschedule to a different
-  date is indistinguishable from "old event cancelled, new one created."
+  date is indistinguishable from "old event cancelled, new one created."~~ *Probably avoidable
+  after all — see the `ClubCalendarEventID` correction in "Data model" above; worth confirming
+  that ID survives a re-export before relying on it.*
 - `event_assignments` handling changes from add-only to delete-and-replace on a recognized match,
   so a dropped/swapped coach in Sprocket actually gets removed here too, not just appended to.
 
@@ -277,6 +282,10 @@ coaches aren't actually logging in yet — the app's real use so far is admin-si
   dry run by default, `--apply` to write. Sets `coaches.email` (lowercased, name-matched exactly,
   unmatched names listed never guessed) and creates pre-confirmed Auth users with no email sent.
   Needs `SUPABASE_SERVICE_ROLE_KEY` as an env var for that run only — never in `.env.local`.
+- [ ] **Create real pay periods** (`/pay-periods`). Found 2026-10-13: the table is **empty**, so
+  every date classifies as Band C — no coach can log or "Confirm hours" on a calendar session at
+  all, only file an `unstructured` claim. Needs at least the current period (and ideally 3 back)
+  before go-live.
 - "Allow new users to sign up" is **off** in Supabase Auth (turned off 2026-10-12), so every login
   must be created deliberately: the script above, or Authentication → Users → Add user.
 
@@ -875,3 +884,39 @@ Due). TEST COACH is now `is_active = false` with no rates (still signs in, since
 `current_coach_id()` ignores `is_active`). The `+scheduler`/`+coach` Auth users are deleted by
 hand in Authentication → Users. The two Natick locations added during R2a (Bennett-Hemenway,
 Sargent 9v9) are real data and were kept.
+
+### Done: R3 paid-time rules + inactive-coach lockout (2026-10-13, `0023_paid_time.sql`)
+
+- **Paid start = scheduled start − N minutes; paid end = scheduled end.** N = the event's
+  `paid_early_minutes` override, else the program's `paid_early_minutes`, else 0; ignored for
+  Camp/Nurse fixed-hours programs. Stored as minutes, not a clock time, so a schedule time change
+  carries the paid window along. "Annual Program" (the only AP-named program) = 15; every other
+  program 0. Editable on the Programs screen (program rule) and Edit Event (per-event override,
+  blank = use the program's).
+- `src/utils/hours.ts`: `paidWindow()` / `paidEarlyMinutes()`; `resolveEventHours()` now takes the
+  **program record**, not its name, so a call site can't silently drop the offset (all 5 call
+  sites — log/confirm, correction, claim approval, review-queue stale check — were caught by the
+  type check). **Entries now record the paid window** (e.g. 17:15–18:30 for a 5:30 AP session) so
+  start/end agree with hours. Coach sees "Paid 5:15 PM – 6:30 PM (includes 15 min before the
+  start)". Correction proposals default to the paid window. Existing entries were not recomputed.
+- **Sprocket import:** `ArrivalTime` is filled on 233/239 rows of the July export (5 min before
+  camps, 10–15 before AP practices), so it is **not** a game signal by itself. The parser sets
+  the event override (start − arrival) **only on rows with `ClubEventType = 'Game'`**
+  (`gameWarmupMinutes()`); AP's 15 comes from the program rule, not ArrivalTime (some AP rows say
+  10). **Unconfirmed:** no export in hand contains a game, so the exact `ClubEventType` value for
+  games still needs checking against a fall export.
+- **Bulk import:** optional `Arrival Time` column (HH:mm, must be before Start Time; otherwise the
+  row is rejected with a message).
+- **Inactive coaches** (Justin, 2026-10-13): `coach_is_active()` added to the coach
+  insert/update policies on `timesheet_entries` and `payment_claims` and the insert policy on
+  `swap_requests`. They can still sign in, read their history, and delete their own pending
+  entries (not asked to block). UI: `isInactiveCoach()` in authProvider → banner in the coach
+  layout, and Log a Session shows a notice instead of the form.
+- Tests: 37 (`npm test`) — paid-time cases, Sprocket game detection incl. a check against the real
+  July export (no practice row gets warm-up), bulk Arrival Time parsing.
+- Verified live: as inactive TEST COACH, inserts into entries/claims/swaps → 403, history still
+  readable, banner + notice shown. As admin: Programs shows AP 15; a 30-min warm-up saved through
+  Edit Event (no stray `schedule_changes` rows). As (temporarily reactivated) TEST COACH, Confirm
+  hours on three Oct 12 test sessions: AP 5:30–6:30 → **1.25** (entry 17:15–18:30), game 10:00–11:00
+  with 30-min warm-up → **1.50** (09:30–11:00), Town Session practice 5:00–6:00 → **1.00**. Needed a
+  temporary Oct 5–18 pay period (the table is empty — see the go-live list).

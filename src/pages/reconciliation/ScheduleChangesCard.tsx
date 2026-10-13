@@ -7,7 +7,7 @@ import { Link } from 'react-router'
 import { supabaseClient } from '../../utility/supabaseClient'
 import { useScheduleAction } from '../../utility/scheduleActions'
 import { describeChange, formatTimeRange, type ScheduleChangeRow } from '../../utility/scheduleChanges'
-import { resolveEventHours } from '../../utils/hours'
+import { paidWindow, resolveEventHours } from '../../utils/hours'
 
 type ChangeWithEvent = ScheduleChangeRow & {
   events: {
@@ -16,6 +16,7 @@ type ChangeWithEvent = ScheduleChangeRow & {
     end_time: string | null
     session_name: string | null
     is_cancelled: boolean
+    paid_early_minutes: number | null
     programs: { name: string } | null
     locations: { name: string; half_day_hours: number | null; full_day_hours: number | null } | null
   } | null
@@ -30,7 +31,7 @@ type AffectedEntry = {
   status: 'pending' | 'paid'
   paid_date: string | null
   coaches: { name: string } | null
-  programs: { name: string } | null
+  programs: { name: string; paid_early_minutes: number | null } | null
 }
 
 type EventGroup = { eventId: string; event: ChangeWithEvent['events']; changes: ChangeWithEvent[] }
@@ -50,7 +51,7 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
     resource: 'schedule_changes',
     meta: {
       select:
-        '*, events(event_date, start_time, end_time, session_name, is_cancelled, programs(name), locations(name, half_day_hours, full_day_hours))',
+        '*, events(event_date, start_time, end_time, session_name, is_cancelled, paid_early_minutes, programs(name), locations(name, half_day_hours, full_day_hours))',
     },
     filters: [{ field: 'review_status', operator: 'eq', value: 'needs_review' }],
     sorters: [{ field: 'changed_at', order: 'asc' }],
@@ -61,7 +62,7 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
 
   const { result: entriesResult, query: entriesQuery } = useList<AffectedEntry>({
     resource: 'timesheet_entries',
-    meta: { select: 'id, coach_id, event_id, entry_date, hours, status, paid_date, coaches(name), programs(name)' },
+    meta: { select: 'id, coach_id, event_id, entry_date, hours, status, paid_date, coaches(name), programs(name, paid_early_minutes)' },
     filters: [{ field: 'event_id', operator: 'in', value: eventIds }],
     pagination: { pageSize: 1000 },
     queryOptions: { enabled: eventIds.length > 0 },
@@ -134,7 +135,11 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
     try {
       const { error } = await supabaseClient
         .from('timesheet_entries')
-        .update({ hours, start_time: group.event?.start_time ?? null, end_time: group.event?.end_time ?? null })
+        .update({
+          hours,
+          start_time: group.event ? paidWindow(entry.programs ?? { name: '' }, group.event).start : null,
+          end_time: group.event?.end_time ?? null,
+        })
         .eq('id', entry.id)
         .eq('status', 'pending')
       if (error) message.error(`Couldn't update the entry: ${error.message}`)
@@ -160,7 +165,7 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
       })
     }
     if (group.changes.some((c) => c.change_type === 'time') && group.event) {
-      const nowWorth = resolveEventHours(entry.programs?.name ?? '', group.event, group.event.locations ?? undefined)
+      const nowWorth = resolveEventHours(entry.programs ?? { name: '' }, group.event, group.event.locations ?? undefined)
       if (nowWorth != null && entry.hours != null && Math.abs(nowWorth - entry.hours) > 0.001) {
         flags.push({
           text: `Recorded ${entry.hours.toFixed(2)} hrs; the session is now ${nowWorth.toFixed(2)} hrs.${entry.status === 'paid' ? ' Already paid at the old hours -- no clawback.' : ''}`,

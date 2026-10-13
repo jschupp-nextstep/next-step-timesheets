@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
 import { useGetIdentity, useLogout } from '@refinedev/core'
-import { Button, Layout, Menu, Typography } from 'antd'
+import { Alert, Button, Layout, Menu, Typography } from 'antd'
 import { Link, useLocation } from 'react-router'
 
-import { coachIdOf, type Identity } from '../providers/authProvider'
+import { coachIdOf, isInactiveCoach, type Identity } from '../providers/authProvider'
 
 // Shared by coaches and schedulers (the non-admin roles). A scheduler who
 // also coaches gets both sets of menu items.
@@ -38,7 +38,18 @@ export const CoachLayout = ({ children }: { children: ReactNode }) => {
         {coachName && <Typography.Text style={{ color: 'white' }}>{coachName}</Typography.Text>}
         <Button onClick={() => logout()}>Log out</Button>
       </Layout.Header>
-      <Layout.Content style={{ padding: 24 }}>{children}</Layout.Content>
+      <Layout.Content style={{ padding: 24 }}>
+        {isInactiveCoach(identity) && (
+          <Alert
+            style={{ marginBottom: 16 }}
+            type="info"
+            showIcon
+            message="Your coach account is inactive."
+            description="You can still see your sessions and paid history, but you can't log sessions, send claims, or request swaps. Contact Next Step if this is a mistake."
+          />
+        )}
+        {children}
+      </Layout.Content>
     </Layout>
   )
 }

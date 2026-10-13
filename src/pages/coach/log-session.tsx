@@ -5,13 +5,13 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { Link, useNavigate, useParams } from 'react-router'
 
 import { supabaseClient } from '../../utility/supabaseClient'
-import { coachIdOf, type Identity } from '../../providers/authProvider'
-import { FIXED_HOURS_HALF, FIXED_HOURS_FULL, timeSpanHours, resolveEventHours } from '../../utils/hours'
+import { coachIdOf, isInactiveCoach, type Identity } from '../../providers/authProvider'
+import { FIXED_HOURS_HALF, FIXED_HOURS_FULL, paidWindow, timeSpanHours, resolveEventHours } from '../../utils/hours'
 import { computeBands, classifyDate, type PayPeriod } from '../../utils/payPeriods'
 import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
 import { BandCUnstructuredClaimForm } from './BandCUnstructuredClaimForm'
 
-type ProgramRow = { id: string; name: string; entry_mode: string }
+type ProgramRow = { id: string; name: string; entry_mode: string; paid_early_minutes: number | null }
 type LocationRow = { id: string; name: string; half_day_hours: number | null; full_day_hours: number | null }
 type EventRow = {
   id: string
@@ -21,6 +21,7 @@ type EventRow = {
   start_time: string | null
   end_time: string | null
   session_name: string | null
+  paid_early_minutes: number | null
 }
 type TimesheetEntryDetail = {
   id: string
@@ -200,14 +201,15 @@ export const LogSession = () => {
   }, [isEditMode, editEntry, programs])
 
   useEffect(() => {
-    if (!isCorrectionMode || populatedRef.current || !correctionEventResult) return
+    if (!isCorrectionMode || populatedRef.current || !correctionEventResult || !correctionProgramResult) return
     populatedRef.current = true
 
-    setCorrectionStart(
-      correctionEventResult.start_time ? dayjs(`2000-01-01T${correctionEventResult.start_time}`) : null,
-    )
-    setCorrectionEnd(correctionEventResult.end_time ? dayjs(`2000-01-01T${correctionEventResult.end_time}`) : null)
-  }, [isCorrectionMode, correctionEventResult])
+    // Default the proposal to the paid window (e.g. AP from 15 min early),
+    // so an unchanged proposal matches what the session is already worth.
+    const window = paidWindow(correctionProgramResult, correctionEventResult)
+    setCorrectionStart(window.start ? dayjs(`2000-01-01T${window.start}`) : null)
+    setCorrectionEnd(window.end ? dayjs(`2000-01-01T${window.end}`) : null)
+  }, [isCorrectionMode, correctionEventResult, correctionProgramResult])
 
   const selectedProgram = programs.find((p) => p.id === programId)
   const isSessionMode = selectedProgram?.entry_mode === 'session'
@@ -290,7 +292,9 @@ export const LogSession = () => {
   const selectedEvent = pickerEvents.find((e) => e.id === eventId)
   const selectedLocation = locationId ? locationsById.get(locationId) : undefined
   const resolvedHours =
-    selectedProgram && selectedEvent ? resolveEventHours(selectedProgram.name, selectedEvent, selectedLocation) : null
+    selectedProgram && selectedEvent ? resolveEventHours(selectedProgram, selectedEvent, selectedLocation) : null
+  // Entries record the paid window (R3), so start/end agree with hours.
+  const selectedWindow = selectedProgram && selectedEvent ? paidWindow(selectedProgram, selectedEvent) : null
   const otherHours = timeSpanHours(
     otherStart?.format('HH:mm:ss') ?? null,
     otherEnd?.format('HH:mm:ss') ?? null,
@@ -400,7 +404,7 @@ export const LogSession = () => {
           event_id: eventId,
           location_id: locationId,
           entry_date: entryDate.format('YYYY-MM-DD'),
-          start_time: selectedEvent?.start_time ?? null,
+          start_time: selectedWindow?.start ?? null,
           end_time: selectedEvent?.end_time ?? null,
           hours: resolvedHours,
           flat_amount: null,
@@ -462,7 +466,7 @@ export const LogSession = () => {
   const correctionScheduledHours =
     correctionEventResult && correctionProgramResult
       ? resolveEventHours(
-          correctionProgramResult.name,
+          correctionProgramResult,
           correctionEventResult,
           locationsById.get(correctionEventResult.location_id),
         )
@@ -507,6 +511,17 @@ export const LogSession = () => {
     } finally {
       setCorrectionSubmitting(false)
     }
+  }
+
+  // Deactivated coaches are read-only (RLS refuses the write anyway, 0023);
+  // say so up front instead of letting them fill out a form that can't save.
+  if (isInactiveCoach(identity)) {
+    return (
+      <div style={{ maxWidth: 560 }}>
+        <Typography.Title level={3}>Log a Session</Typography.Title>
+        <Typography.Paragraph type="secondary">Your account is inactive, so new sessions can't be logged.</Typography.Paragraph>
+      </div>
+    )
   }
 
   if (isEditMode && editEntryQuery.isLoading) {
@@ -790,6 +805,13 @@ export const LogSession = () => {
                       showIcon
                       message="This location is missing hour data -- contact an admin before submitting."
                     />
+                  )}
+                  {selectedWindow && selectedWindow.earlyMinutes > 0 && selectedWindow.start && selectedWindow.end && (
+                    <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
+                      Paid {dayjs(`2000-01-01T${selectedWindow.start}`).format('h:mm A')} –{' '}
+                      {dayjs(`2000-01-01T${selectedWindow.end}`).format('h:mm A')} (includes {selectedWindow.earlyMinutes} min
+                      before the start)
+                    </Typography.Text>
                   )}
                 </Form.Item>
               )}

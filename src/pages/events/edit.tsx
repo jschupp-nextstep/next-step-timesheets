@@ -1,5 +1,5 @@
 import { Edit, useForm, useSelect } from '@refinedev/antd'
-import { DatePicker, Form, Input, Select, Switch, TimePicker } from 'antd'
+import { DatePicker, Form, Input, InputNumber, Select, Switch, TimePicker } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 
 type EventFormValues = {
@@ -11,6 +11,7 @@ type EventFormValues = {
   session_name: string | null
   notes: string | null
   is_cancelled: boolean
+  paid_early_minutes: number | null
 }
 
 export const EventEdit = () => {
@@ -51,6 +52,7 @@ export const EventEdit = () => {
             event_date: values.event_date.format('YYYY-MM-DD'),
             start_time: values.start_time?.format('HH:mm:ss') ?? null,
             end_time: values.end_time?.format('HH:mm:ss') ?? null,
+            paid_early_minutes: values.paid_early_minutes ?? null,
           })
         }}
       >
@@ -68,6 +70,13 @@ export const EventEdit = () => {
         </Form.Item>
         <Form.Item label="End Time" name="end_time">
           <TimePicker format="HH:mm" style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item
+          label="Paid from (minutes before start) -- this event only"
+          name="paid_early_minutes"
+          extra="Leave blank to use the program's rule. Set it for a game's warm-up (e.g. 30), or 0 to pay scheduled time only. Already-confirmed entries aren't changed."
+        >
+          <InputNumber min={0} max={180} step={5} style={{ width: '100%' }} addonAfter="min" />
         </Form.Item>
         <Form.Item label="Session / Team Name" name="session_name">
           <Input />

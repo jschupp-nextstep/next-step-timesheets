@@ -13,6 +13,8 @@ export type SprocketRow = {
   ProgramName: string
   TeamName: string
   IsCancelled: string
+  ArrivalTime?: string
+  ClubEventType?: string
 }
 
 export type ParsedEvent = {
@@ -26,6 +28,11 @@ export type ParsedEvent = {
   sessionName: string
   isCancelled: boolean
   assignedCoachNames: string[]
+  // Minutes before start a coach is paid from (R3). Set only for games:
+  // Sprocket fills ArrivalTime on nearly every row (5 min before camps,
+  // 10-15 before AP practices), so it's only a warm-up signal on Game rows.
+  // AP's early start comes from the program rule instead.
+  paidEarlyMinutes: number | null
 }
 
 export type ParseResult = {
@@ -190,6 +197,19 @@ function parseTime12h(value: string): string | null {
   return parsed.isValid() ? parsed.format('HH:mm:ss') : null
 }
 
+// Warm-up minutes for a Game row: start minus ArrivalTime. Null for any
+// other event type, a missing/unparseable arrival, or an arrival that isn't
+// actually before the start.
+export function gameWarmupMinutes(row: Pick<SprocketRow, 'ClubEventType' | 'ArrivalTime' | 'StartDateTime'>): number | null {
+  if (row.ClubEventType?.trim().toLowerCase() !== 'game') return null
+  const arrival = parseTime12h(row.ArrivalTime ?? '')
+  const start = parseTime12h(row.StartDateTime)
+  if (!arrival || !start) return null
+  const toMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+  const minutes = toMinutes(start) - toMinutes(arrival)
+  return minutes > 0 ? minutes : null
+}
+
 function parseDate(value: string): string | null {
   const trimmed = value?.trim()
   if (!trimmed) return null
@@ -239,6 +259,7 @@ export function parseSprocketCsv(csvText: string): ParseResult {
         sessionName: isStaffed ? base : teamName || base,
         isCancelled: row.IsCancelled?.trim().toLowerCase() === 'yes',
         assignedCoachNames: [],
+        paidEarlyMinutes: gameWarmupMinutes(row),
       }
       groups.set(groupKey, event)
     }
