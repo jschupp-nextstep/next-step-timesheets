@@ -1,5 +1,6 @@
 import { Create, useForm, useSelect } from '@refinedev/antd'
-import { Form, InputNumber, Select } from 'antd'
+import { DatePicker, Form, InputNumber, Select } from 'antd'
+import type { Dayjs } from 'dayjs'
 import { useSearchParams } from 'react-router'
 
 export const RateCreate = () => {
@@ -20,6 +21,10 @@ export const RateCreate = () => {
       <Form
         {...formProps}
         layout="vertical"
+        onFinish={(rawValues) => {
+          const values = rawValues as Record<string, unknown> & { effective_from?: Dayjs | null }
+          formProps.onFinish?.({ ...values, effective_from: values.effective_from?.format('YYYY-MM-DD') ?? null })
+        }}
         initialValues={{
           coach_id: searchParams.get('coach_id') || undefined,
           program_id: searchParams.get('program_id') || undefined,
@@ -33,6 +38,13 @@ export const RateCreate = () => {
         </Form.Item>
         <Form.Item label="Hourly Rate" name="hourly_rate" rules={[{ required: true }]}>
           <InputNumber min={0} step={0.5} style={{ width: '100%' }} addonBefore="$" />
+        </Form.Item>
+        <Form.Item
+          label="In effect from"
+          name="effective_from"
+          extra="Leave empty for “since the beginning”. To change an existing rate from a date, use “Change rate…” on the Rates list."
+        >
+          <DatePicker style={{ width: '100%' }} />
         </Form.Item>
       </Form>
     </Create>

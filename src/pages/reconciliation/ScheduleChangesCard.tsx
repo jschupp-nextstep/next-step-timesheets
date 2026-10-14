@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { Alert, App, Button, Card, Empty, Input, Modal, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { Link } from 'react-router'
 
@@ -174,7 +174,7 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
       }
     }
     if (group.changes.some((c) => c.change_type === 'cancel') && group.event?.is_cancelled) {
-      flags.push({ text: 'Session is now cancelled but has logged hours -- decide whether this is paid (R6 rules).' })
+      flags.push({ text: 'Session is now cancelled but has logged hours -- held in Payment Due under "Entries on canceled sessions" until you decide.' })
     }
     return flags
   }
@@ -185,6 +185,20 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
       size="small"
       style={{ marginBottom: 16 }}
       loading={query.isLoading}
+      extra={
+        changes.length > 1 && (
+          // R9: a scheduler staffing a week (e.g. Luis's AP roster) produces
+          // many routine adds; review them in one step once you've scanned them.
+          <Popconfirm
+            title={`Mark all ${changes.length} changes reviewed?`}
+            description="Releases every entry they're holding. Reverse anything that's wrong first."
+            okText="Mark all reviewed"
+            onConfirm={() => markReviewed(changes.map((c) => c.id))}
+          >
+            <Button size="small">Mark all reviewed</Button>
+          </Popconfirm>
+        )
+      }
     >
       <Typography.Paragraph type="secondary">
         Changes schedulers made. They're already live; entries on these sessions are held out of Payment Due and

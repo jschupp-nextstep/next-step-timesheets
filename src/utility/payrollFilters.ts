@@ -23,6 +23,10 @@ export type PayrollFilterEntry = {
   cutover_resolution: CutoverResolution | null
   // R4 (0025): payable = pending AND no admin flag.
   admin_flag?: AdminFlag | null
+  // R6 (0028): entries on a canceled session aren't paid unless an admin
+  // approved the exception.
+  event_cancelled?: boolean
+  canceled_event_pay_approved?: boolean
 }
 
 // Pre-cutover entries were paid in the old Sheets system -- excluded from
@@ -39,7 +43,8 @@ export function isPreCutoverExcluded(entry: PayrollFilterEntry, cutoverDate: str
 // a schedule change still awaiting review (R2c payroll hold); `onHold` is
 // in-range entries an admin put on Hold with a question (R4); `excluded` is
 // entries flagged Canceled / Not Next Step, whatever their date -- never
-// payable, never counted as owed. Every entry lands in exactly one bucket,
+// payable, never counted as owed; `onCanceledSession` is in-range entries on
+// a session that was cancelled, awaiting your decision (R6). Every entry lands in exactly one bucket,
 // and nothing dated on or after cutover can ever land in `preCutover`.
 export function partitionPendingEntries<T extends PayrollFilterEntry & { event_id?: string | null }>(
   entries: T[],
@@ -50,6 +55,7 @@ export function partitionPendingEntries<T extends PayrollFilterEntry & { event_i
   const payable: T[] = []
   const held: T[] = []
   const onHold: T[] = []
+  const onCanceledSession: T[] = []
   const excluded: T[] = []
   const preCutover: T[] = []
   const beforeRange: T[] = []
@@ -60,10 +66,11 @@ export function partitionPendingEntries<T extends PayrollFilterEntry & { event_i
     else if (entry.admin_flag === 'canceled' || entry.admin_flag === 'not_next_step') excluded.push(entry)
     else if (!inRange(entry.entry_date, range)) (entry.entry_date < start ? beforeRange : afterRange).push(entry)
     else if (entry.admin_flag === 'hold') onHold.push(entry)
+    else if (entry.event_cancelled && !entry.canceled_event_pay_approved) onCanceledSession.push(entry)
     else if (entry.event_id && heldEventIds.has(entry.event_id)) held.push(entry)
     else payable.push(entry)
   }
-  return { payable, held, onHold, excluded, preCutover, beforeRange, afterRange }
+  return { payable, held, onHold, onCanceledSession, excluded, preCutover, beforeRange, afterRange }
 }
 
 // Events with at least one scheduler change still awaiting review -- their

@@ -16,6 +16,7 @@ export type ScheduleFunction =
   | 'schedule_create_event'
   | 'schedule_mark_reviewed'
   | 'schedule_reverse'
+  | 'schedule_cancel_day'
 
 type RpcError = { message?: string; code?: string; details?: string | null; hint?: string | null } | null
 

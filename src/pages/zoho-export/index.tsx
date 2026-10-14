@@ -4,7 +4,7 @@ import { Alert, App, Button, Card, DatePicker, Space, Table, Typography } from '
 import { Link } from 'react-router'
 import dayjs from 'dayjs'
 
-import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
+import { buildRateLookup, computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
 import { splitWeekly, type WeeklyPayment, type WeeklyRate } from '../../utility/weeklyPay'
 import { useAppSettings } from '../../utility/appSettings'
 import {
@@ -28,6 +28,8 @@ type EntryRow = {
   cutover_resolution: CutoverResolution | null
   event_id: string | null
   admin_flag: AdminFlag | null
+  canceled_event_pay_approved: boolean
+  events: { is_cancelled: boolean } | null
   coaches: { name: string; pay_type: '1099' | 'w2' } | null
   programs: { name: string; entry_mode: string } | null
 }
@@ -106,7 +108,7 @@ export const ZohoExport = () => {
 
   const { result, query } = useList<EntryRow>({
     resource: 'timesheet_entries',
-    meta: { select: '*, coaches(name, pay_type), programs(name, entry_mode)' },
+    meta: { select: '*, coaches(name, pay_type), programs(name, entry_mode), events(is_cancelled)' },
     filters: [
       { field: 'status', operator: 'eq', value: 'pending' },
       { field: 'entry_date', operator: 'gte', value: range[0].format('YYYY-MM-DD') },
@@ -121,7 +123,12 @@ export const ZohoExport = () => {
     () =>
       (result?.data ?? []).filter(
         // Also never export an entry on Hold / Canceled / Not Next Step (R4).
-        (e) => !isPreCutoverExcluded(e, cutoverDate) && !(e.event_id && heldEventIds.has(e.event_id)) && !e.admin_flag,
+        // ...nor one on a canceled session unless paid as an exception (R6).
+        (e) =>
+          !isPreCutoverExcluded(e, cutoverDate) &&
+          !(e.event_id && heldEventIds.has(e.event_id)) &&
+          !e.admin_flag &&
+          !(e.events?.is_cancelled && !e.canceled_event_pay_approved),
       ),
     [result?.data, cutoverDate, heldEventIds],
   )
@@ -137,10 +144,9 @@ export const ZohoExport = () => {
   })
   const { result: programsResult } = useList<ProgramRow>({ resource: 'programs', pagination: { pageSize: 100 } })
 
-  const ratesByCoachProgram = useMemo(
-    () => new Map((ratesResult?.data ?? []).map((r) => [`${r.coach_id}|${r.program_id}`, r])),
-    [ratesResult?.data],
-  )
+  // Date-aware (R8 rate history): each entry is priced at the rate in
+  // effect on its own date.
+  const ratesByCoachProgram = useMemo(() => buildRateLookup(ratesResult?.data ?? []), [ratesResult?.data])
   const oneVOneByCoach = useMemo(
     () => new Map((oneVOneResult?.data ?? []).map((r) => [r.coach_id, r])),
     [oneVOneResult?.data],

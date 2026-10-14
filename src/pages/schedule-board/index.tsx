@@ -7,6 +7,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { Link } from 'react-router'
 
 import { useScheduleAction } from '../../utility/scheduleActions'
+import { CancelDayButton } from '../../components/CancelDayButton'
 
 type Assignment = {
   id: string
@@ -248,6 +249,7 @@ export const ScheduleBoard = () => {
         <Typography.Text strong>
           {weekStart.format('MMM D')} – {weekEnd.format('MMM D, YYYY')}
         </Typography.Text>
+        <CancelDayButton onDone={() => query.refetch()} />
       </Space>
 
       <div

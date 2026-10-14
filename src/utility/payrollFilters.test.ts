@@ -147,3 +147,19 @@ describe('admin flags (R4)', () => {
     expect(result.afterRange.map((e) => e.id)).toEqual([holdOutOfRange.id])
   })
 })
+
+describe('entries on canceled sessions (R6)', () => {
+  const r = range('2026-10-07', '2026-10-20')
+  const onCanceled = { ...entry('2026-10-09'), event_cancelled: true }
+  const approved = { ...entry('2026-10-09'), event_cancelled: true, canceled_event_pay_approved: true }
+  const normal = { ...entry('2026-10-09'), event_cancelled: false }
+  const result = partitionPendingEntries([onCanceled, approved, normal], r, CUTOVER)
+
+  it('holds entries on a canceled session out of payment by default', () => {
+    expect(result.onCanceledSession.map((e) => e.id)).toEqual([onCanceled.id])
+  })
+
+  it('pays them once the exception is approved', () => {
+    expect(result.payable.map((e) => e.id)).toEqual([approved.id, normal.id])
+  })
+})

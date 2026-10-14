@@ -252,7 +252,9 @@ export const LogSession = () => {
     filters: [
       { field: 'coach_id', operator: 'eq', value: coachId },
       { field: 'status', operator: 'eq', value: 'paid' },
-      { field: 'event_id', operator: 'nnull', value: true },
+      // value must be null: Refine's supabase provider turns nnull + true into
+      // `IS TRUE`, which errors on a uuid column (the query then fails silently).
+      { field: 'event_id', operator: 'nnull', value: null },
     ],
     queryOptions: { enabled: isSessionMode && band === 'A' && !!coachId },
   })

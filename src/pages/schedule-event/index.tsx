@@ -21,7 +21,13 @@ import { Link, useParams } from 'react-router'
 
 import type { Identity } from '../../providers/authProvider'
 import { useScheduleAction, type ScheduleFunction } from '../../utility/scheduleActions'
-import { describeChange, formatTimeRange, type ScheduleChangeRow } from '../../utility/scheduleChanges'
+import {
+  CANCELLATION_TIMING_LABEL,
+  CANCELLATION_TIMING_OPTIONS,
+  describeChange,
+  formatTimeRange,
+  type ScheduleChangeRow,
+} from '../../utility/scheduleChanges'
 
 type Assignment = { id: string; coach_id: string; covering_for_coach_id: string | null; source: string }
 type EventRow = {
@@ -31,6 +37,7 @@ type EventRow = {
   end_time: string | null
   session_name: string | null
   is_cancelled: boolean
+  cancellation_timing: string | null
   series_id: string | null
   programs: { name: string } | null
   locations: { name: string } | null
@@ -71,6 +78,7 @@ export const ScheduleEvent = () => {
   const [newStart, setNewStart] = useState<Dayjs | null>(null)
   const [newEnd, setNewEnd] = useState<Dayjs | null>(null)
   const [applyToSeries, setApplyToSeries] = useState(false)
+  const [timing, setTiming] = useState<string | undefined>()
 
   const { result: event, query: eventQuery } = useOne<EventRow>({
     resource: 'events',
@@ -103,6 +111,7 @@ export const ScheduleEvent = () => {
     setReason('')
     setInCoachId(undefined)
     setApplyToSeries(false)
+    setTiming(undefined)
     setNewStart(event?.start_time ? dayjs(`2000-01-01T${event.start_time}`) : null)
     setNewEnd(event?.end_time ? dayjs(`2000-01-01T${event.end_time}`) : null)
   }
@@ -145,7 +154,12 @@ export const ScheduleEvent = () => {
       case 'cancel':
       case 'restore':
         fn = 'schedule_set_cancelled'
-        args = { p_event_id: event.id, p_cancelled: action.kind === 'cancel', p_reason: reason }
+        args = {
+          p_event_id: event.id,
+          p_cancelled: action.kind === 'cancel',
+          p_reason: reason,
+          p_timing: action.kind === 'cancel' ? (timing ?? null) : null,
+        }
         success = action.kind === 'cancel' ? 'Session cancelled' : 'Session restored'
         break
     }
@@ -158,7 +172,11 @@ export const ScheduleEvent = () => {
   }
 
   const needsCoachPick = action?.kind === 'sub' || action?.kind === 'add'
-  const canSubmit = !!reason.trim() && (!needsCoachPick || !!inCoachId) && (action?.kind !== 'time' || (!!newStart && !!newEnd))
+  const canSubmit =
+    !!reason.trim() &&
+    (!needsCoachPick || !!inCoachId) &&
+    (action?.kind !== 'time' || (!!newStart && !!newEnd)) &&
+    (action?.kind !== 'cancel' || !!timing)
 
   if (eventQuery.isLoading) return <Card loading style={{ maxWidth: 640 }} />
   if (!event) {
@@ -183,7 +201,7 @@ export const ScheduleEvent = () => {
         {event.session_name ? ` · ${event.session_name}` : ''}
         {event.is_cancelled && (
           <Tag color="red" style={{ marginLeft: 8 }}>
-            Cancelled
+            {CANCELLATION_TIMING_LABEL[event.cancellation_timing ?? ''] ?? 'Cancelled'}
           </Tag>
         )}
       </Typography.Paragraph>
@@ -306,6 +324,11 @@ export const ScheduleEvent = () => {
                 </Form.Item>
               )}
             </>
+          )}
+          {action?.kind === 'cancel' && (
+            <Form.Item label="When was it cancelled?" required>
+              <Select value={timing} onChange={setTiming} options={CANCELLATION_TIMING_OPTIONS} placeholder="Pick one" />
+            </Form.Item>
           )}
           <Form.Item label="Reason" required extra="Shown to payroll when this change is reviewed.">
             <Input.TextArea

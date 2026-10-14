@@ -6,7 +6,7 @@ import dayjs from 'dayjs'
 import { Link } from 'react-router'
 
 import { supabaseClient } from '../../utility/supabaseClient'
-import { computeAmount, type OneVOneRateRow, type PaidRateBasis, type RateRow } from '../../utility/payroll'
+import { buildRateLookup, computeAmount, type OneVOneRateRow, type PaidRateBasis, type RateRow } from '../../utility/payroll'
 import { useAppSettings } from '../../utility/appSettings'
 import {
   formatRange,
@@ -22,6 +22,9 @@ import { EntryThread } from '../../components/EntryThread'
 import { ADMIN_FLAG_LABEL, threadState, type EntryMessage } from '../../utility/entryFlags'
 import { splitWeekly, type WeeklyPayment } from '../../utility/weeklyPay'
 import { WeeklyPaidHistory, WeeklyPayCard, type WeeklyRateWithNames } from './WeeklyPayCard'
+import { AdjustmentButton } from './AdjustmentButton'
+import { useDoublePayFlags } from '../../utility/useDoublePay'
+import { CanceledSessionsCard } from './CanceledSessionsCard'
 
 type EntryRow = {
   id: string
@@ -36,6 +39,8 @@ type EntryRow = {
   cutover_resolution: CutoverResolution | null
   admin_flag: AdminFlag | null
   admin_flag_reason: string | null
+  canceled_event_pay_approved: boolean
+  events: { is_cancelled: boolean; cancellation_timing: string | null } | null
   event_id: string | null
   paid_rate: number | null
   paid_amount: number | null
@@ -69,6 +74,8 @@ export const PaymentDue = () => {
   const { cutoverDate, paidThroughDate, isLoading: settingsLoading, refetch: refetchSettings } = useAppSettings()
   const { range, setRange, queryString } = usePayrollRange(paidThroughDate, cutoverDate)
   const { heldEventIds, isLoading: heldLoading, refetch: refetchHeld } = useHeldEventIds()
+  // R5: warn before paying a session that looks double-paid.
+  const doublePay = useDoublePayFlags()
 
   // Pending: fetch every pending entry and partition client-side, so
   // entries outside the chosen range (or before cutover) can be counted and
@@ -76,7 +83,7 @@ export const PaymentDue = () => {
   // that one is range-filtered server-side.
   const { result, query } = useList<EntryRow>({
     resource: 'timesheet_entries',
-    meta: { select: '*, coaches(name), programs(name, entry_mode)' },
+    meta: { select: '*, coaches(name), programs(name, entry_mode), events(is_cancelled, cancellation_timing)' },
     filters:
       statusFilter === 'pending'
         ? [{ field: 'status', operator: 'eq', value: 'pending' }]
@@ -104,16 +111,22 @@ export const PaymentDue = () => {
     pagination: { pageSize: 100 },
   })
 
-  const allEntries = result?.data ?? []
+  // event_cancelled feeds the R6 partition bucket (entries on canceled
+  // sessions aren't paid unless approved as an exception).
+  const allEntries = useMemo(
+    () => (result?.data ?? []).map((e) => ({ ...e, event_cancelled: !!e.events?.is_cancelled })),
+    [result?.data],
+  )
 
   // Paid history is already range-filtered server-side; only the pre-cutover
   // exclusion applies there.
-  const { entries, held, onHold, excluded, preCutover, beforeRange, afterRange } = useMemo(() => {
+  const { entries, held, onHold, onCanceledSession, excluded, preCutover, beforeRange, afterRange } = useMemo(() => {
     if (statusFilter === 'paid') {
       return {
         entries: allEntries.filter((e) => !isPreCutoverExcluded(e, cutoverDate)),
         held: [],
         onHold: [],
+        onCanceledSession: [],
         excluded: [],
         preCutover: [],
         beforeRange: [],
@@ -144,16 +157,19 @@ export const PaymentDue = () => {
     holdMessagesQuery.refetch()
   }
 
-  const ratesByCoachProgram = useMemo(
-    () => new Map((ratesResult?.data ?? []).map((r) => [`${r.coach_id}|${r.program_id}`, r])),
-    [ratesResult?.data],
-  )
+  // Date-aware (R8 rate history): each entry is priced at the rate in
+  // effect on its own date.
+  const ratesByCoachProgram = useMemo(() => buildRateLookup(ratesResult?.data ?? []), [ratesResult?.data])
   const oneVOneByCoach = useMemo(
     () => new Map((oneVOneResult?.data ?? []).map((r) => [r.coach_id, r])),
     [oneVOneResult?.data],
   )
   const coachingProgramId = useMemo(
     () => (programsResult?.data ?? []).find((p) => p.name === 'Coaching')?.id,
+    [programsResult?.data],
+  )
+  const adjustmentProgramId = useMemo(
+    () => (programsResult?.data ?? []).find((p) => p.name === 'Adjustment')?.id,
     [programsResult?.data],
   )
 
@@ -248,7 +264,7 @@ export const PaymentDue = () => {
     // Held entries count as unpaid in the range too -- advancing past them
     // would drop them out of the next default range.
     const remaining = entries.filter((e) => !justPaidIds.includes(e.id))
-    if (remaining.length > 0 || held.length > 0 || onHold.length > 0) return
+    if (remaining.length > 0 || held.length > 0 || onHold.length > 0 || onCanceledSession.length > 0) return
     // Never past today: a range ending in the future (e.g. after paying a
     // week in advance) would otherwise push the next default range past
     // days whose sessions haven't been logged yet.
@@ -441,6 +457,7 @@ export const PaymentDue = () => {
           }}
         />
         <Link to={`/zoho-export?${queryString}`}>Zoho export for these dates →</Link>
+        {statusFilter === 'pending' && <AdjustmentButton adjustmentProgramId={adjustmentProgramId} onAdded={() => query.refetch()} />}
       </Space>
 
       {statusFilter === 'pending' && (
@@ -452,6 +469,21 @@ export const PaymentDue = () => {
         </Typography.Paragraph>
       )}
 
+      {statusFilter === 'pending' && doublePay.openFlags.length > 0 && (
+        <Alert
+          style={{ marginBottom: 16 }}
+          type="error"
+          showIcon
+          message={`${doublePay.openFlags.length} session${doublePay.openFlags.length === 1 ? '' : 's'} may be double-paid`}
+          description={
+            <>
+              A covering coach and the coach they covered for both logged hours (or more coaches logged than were
+              scheduled). Check <Link to="/reconciliation">Reconciliation → Possible double pay</Link> before marking
+              paid.
+            </>
+          }
+        />
+      )}
       {statusFilter === 'pending' && beforeRange.length > 0 && (
         <Alert
           style={{ marginBottom: 16 }}
@@ -529,6 +561,10 @@ export const PaymentDue = () => {
             query.refetch()
           }}
         />
+      )}
+
+      {statusFilter === 'pending' && onCanceledSession.length > 0 && (
+        <CanceledSessionsCard entries={onCanceledSession} onDone={refreshFlags} />
       )}
 
       {statusFilter === 'pending' && onHold.length > 0 && (

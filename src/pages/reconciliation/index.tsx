@@ -7,6 +7,7 @@ import type { Identity } from '../../providers/authProvider'
 import { paidWindow, resolveEventHours } from '../../utils/hours'
 import { useScheduleAction } from '../../utility/scheduleActions'
 import { ScheduleChangesCard } from './ScheduleChangesCard'
+import { DoublePayCard } from './DoublePayCard'
 
 type EventRef = {
   id: string
@@ -471,6 +472,8 @@ export const Reconciliation = () => {
       </Typography.Paragraph>
 
       <ScheduleChangesCard onReviewed={() => query.refetch()} />
+
+      <DoublePayCard />
 
       {oversightCandidates.length > 0 && (
         <Card

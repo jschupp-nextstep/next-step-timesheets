@@ -5,6 +5,7 @@ import { Alert, DatePicker, Form, Input, InputNumber, Select, TimePicker } from 
 import dayjs, { type Dayjs } from 'dayjs'
 
 import {
+  buildRateLookup,
   computeAmount,
   PAID_RATE_BASIS_LABEL,
   type OneVOneRateRow,
@@ -94,17 +95,26 @@ export const EntryEdit = () => {
   const programId = Form.useWatch('program_id', form)
   const hours = Form.useWatch('hours', form)
   const flatAmount = Form.useWatch('flat_amount', form)
+  const entryDate = Form.useWatch('entry_date', form)
 
   const program = (programsResult?.data ?? []).find((p) => p.id === programId)
   const computed = useMemo(() => {
     if (!coachId || !programId) return null
     return computeAmount(
-      { id: '', coach_id: coachId, program_id: programId, hours: hours ?? null, flat_amount: flatAmount ?? null, programs: program ?? null },
-      new Map((ratesResult?.data ?? []).map((r) => [`${r.coach_id}|${r.program_id}`, r])),
+      {
+        id: '',
+        coach_id: coachId,
+        program_id: programId,
+        entry_date: entryDate ? entryDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+        hours: hours ?? null,
+        flat_amount: flatAmount ?? null,
+        programs: program ?? null,
+      },
+      buildRateLookup(ratesResult?.data ?? []),
       (programsResult?.data ?? []).find((p) => p.name === 'Coaching')?.id,
       new Map((oneVOneResult?.data ?? []).map((r) => [r.coach_id, r])),
     )
-  }, [coachId, programId, hours, flatAmount, program, ratesResult?.data, oneVOneResult?.data, programsResult?.data])
+  }, [coachId, programId, entryDate, hours, flatAmount, program, ratesResult?.data, oneVOneResult?.data, programsResult?.data])
 
   // Hourly entries need a rate; flat fees and 1v1 sessions don't have one.
   const isHourly = flatAmount == null && program?.entry_mode !== 'direct_flat'

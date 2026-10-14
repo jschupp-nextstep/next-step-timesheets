@@ -7,6 +7,8 @@ import dayjs from 'dayjs'
 
 import { describeScope, type ScopeLabelRow } from '../../utility/schedulerScopes'
 import { NewSessionModal } from './NewSessionModal'
+import { AssignCoachesModal } from './AssignCoachesModal'
+import { CancelDayButton } from '../../components/CancelDayButton'
 import type { CreateScopeRow } from '../../utility/schedulerScopes'
 
 type EventRow = {
@@ -38,6 +40,7 @@ export const Schedule = () => {
   const [weekStart, setWeekStart] = useState(() => dayjs().startOf('day'))
   const weekEnd = weekStart.add(6, 'day')
   const [creating, setCreating] = useState(false)
+  const [assigning, setAssigning] = useState<{ id: string; label: string; assignedIds: string[] } | null>(null)
 
   // Coach names come from coach_directory (names only), not coaches --
   // schedulers can't read the coaches table since 0018_tighten_reads.sql.
@@ -89,7 +92,10 @@ export const Schedule = () => {
             New session
           </Button>
         )}
+        <CancelDayButton scopeNote="that you manage" onDone={() => query.refetch()} />
       </Space>
+
+      <AssignCoachesModal event={assigning} onClose={() => setAssigning(null)} onDone={() => query.refetch()} />
 
       <NewSessionModal
         open={creating}
@@ -142,6 +148,25 @@ export const Schedule = () => {
                       ))
                     ) : (
                       <Tag color="red">Unfilled</Tag>
+                    )}
+                    {!event.is_cancelled && (
+                      <Button
+                        size="small"
+                        type="link"
+                        style={{ padding: 0 }}
+                        onClick={(e) => {
+                          // Inside the row's link -- don't navigate.
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setAssigning({
+                            id: event.id,
+                            label: `${dayjs(event.event_date).format('ddd M/D')} ${formatTimeRange(event.start_time, event.end_time)}`,
+                            assignedIds: event.event_assignments.map((a) => a.coach_id),
+                          })
+                        }}
+                      >
+                        + Assign
+                      </Button>
                     )}
                   </div>
                 </Link>

@@ -188,7 +188,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, R9 and the rest of R8 (rate effective dates, adjustments) not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9's code done 2026-10-14 (R9 still needs Luis's scheduler login set up) |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -227,7 +227,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0026`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0028`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -1035,3 +1035,71 @@ sessions appear as owed**; Prince's weeks start Saturday, Hayley's Monday (`week
   **Not seen on screen:** the coach's "Weekly pay" line in My Sessions, and the paid-through cap
   (logic changed after the run that exposed it). Test sessions deleted and paid-through reset in
   the app; the 2 test `weekly_payments` + the test rate were removed by SQL (no API delete path).
+
+### Done: R8 (rest), R6, R5, R9 code (2026-10-14, `0027_rate_history_adjustments.sql`, `0028_cancellations.sql`)
+
+Built in one pass at Justin's request ("get as far as you can before needing me"); decisions made
+along the way are marked **(decision)** — Justin can revisit any of them.
+
+**R8 rest — rate history + adjustments (0027):**
+- `rates.effective_from` / `effective_to` (null = since the beginning / ongoing; existing rates
+  unchanged). The one-rate-per-coach+program unique constraint was dropped; a trigger
+  (`rates_no_overlap`) refuses two **active** rates for the same coach+program covering the same
+  day. `change_rate(rate, new_rate, from)` closes the current row the day before and starts a new
+  one — Rates list → "Change rate…". Editing an amount in place still works but warns
+  **(decision)**.
+- `computeAmount` now takes a date-aware `RateLookup` (`buildRateLookup` in `payroll.ts`); every
+  entry is priced at the rate in effect on its own `entry_date`. Paid entries never change (0024).
+- **Adjustments:** an admin-only "Adjustment" program; Payment Due → "Add adjustment…" inserts a
+  pending flat-amount entry with a required reason, so it pays (basis `flat`) and exports like any
+  flat amount. **Positive only** (no clawbacks) **(decision)**.
+
+**R6 — cancellations (0028):**
+- `events.cancellation_timing` (`in_advance` / `same_day` / `after_arrival`).
+  `schedule_set_cancelled` gained an optional `p_timing` (old 3-arg calls still resolve); the event
+  page asks for timing when cancelling one session.
+- `schedule_cancel_day(date, program_ids|null, reason, timing)`: admins cancel every matching
+  session; **schedulers only the sessions they manage** (logged → review queue) **(decision)**;
+  timing required; refuses if nothing matched. "Cancel a day…" on the Schedule Board and the
+  scheduler Schedule page.
+- Entries on a cancelled session aren't paid by default: new partition bucket
+  `onCanceledSession`; Payment Due card "Entries on canceled sessions" (Pay anyway… / Hold /
+  Canceled / Not NS); `approve_canceled_event_pay(entry, reason)` sets
+  `timesheet_entries.canceled_event_pay_approved` (admin-only via `protect_admin_flag`) and posts
+  the reason to the entry thread; `mark_entries_paid` and the Zoho export refuse/skip unapproved
+  ones. Coaches see cancelled upcoming sessions in My Sessions labelled with the timing (no
+  actions) instead of the session vanishing.
+
+**R5 — double-pay flag (no migration):** `findDoublePay` (`src/utility/doublePay.ts`) flags a
+session when a covering coach and the coach they covered for both logged (from
+`covering_for_coach_id` or the sub history — reversed subs ignored), when more coaches logged than
+were scheduled, or when an approved unassigned claim sits next to a scheduled coach's entry.
+Canceled/Not-NS entries are ignored. `useDoublePayFlags()` (120-day lookback **(decision)**) feeds
+Reconciliation → "Possible double pay" (Hold/Canceled per entry) and a red warning on Payment Due
+while any flagged session is unpaid. Flags only; never blocks payment by itself.
+
+**R9 — AP attendance from Luis (code part):** scheduler Schedule list → "+ Assign" on each session
+(multi-coach, one logged `schedule_add` each); review queue → "Mark all reviewed" for routine
+batches (a weekly AP roster otherwise means one review per session, and each unreviewed change
+holds that session's pay). **Still to do (setup, not code):** Luis's Auth user + a scheduler row
+with an "Annual Program" rule. **Open question for Justin:** should a scheduler's assignment to a
+not-yet-staffed *future* session count as routine (auto-reviewed), with only day-of/after-the-fact
+changes held? Kept as "everything reviewed" for now.
+
+**Bug found and fixed (pre-existing):** Refine's supabase provider turns `{ operator: 'nnull',
+value: true }` into `IS TRUE`, which errors on a uuid column — so the query silently returned
+nothing. That pattern was in `log-session.tsx`'s Band A "exclude events you were already paid
+for" query **since Phase 6**, i.e. a coach could re-log a session they'd been paid for. Fixed there
+and in the new double-pay hook by passing `value: null`. **Rule: for `nnull`/`null` filters,
+always pass `value: null`.**
+
+- Tests: 63 (`npm test`): rate-history pricing (the doc's Pat $50 → $60 from 10/1), canceled-session
+  bucket, 7 double-pay cases (incl. the Pat/Keith and Norley/Bryce patterns).
+- Verified live 2026-10-14: change_rate split $50/$60 at 10/10 and priced 10/8 at $50, 10/12 at $60;
+  overlapping and ended-rate changes refused; $107.50 adjustment in Payment Due and Zoho; cancel-day
+  without timing refused, then cancelled 1 test session (same_day), again → "no active sessions";
+  Mark all paid on its entry refused; Pay anyway (with reason) released it and posted the reason;
+  "Possible double pay (1 open)" with both reasons and Payment Due's "1 session may be double-paid";
+  Zoho $337.50 for the test coach; Rates list showed the dated rows; Cancel-a-day and single-cancel
+  timing dialogs rendered; as TEST COACH, a cancelled upcoming session showed "Cancelled in advance"
+  with no actions beside a normal active one. Test data removed by SQL afterward.

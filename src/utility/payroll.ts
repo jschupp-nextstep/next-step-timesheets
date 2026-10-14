@@ -8,12 +8,41 @@ export type PayrollEntry = {
   id: string
   coach_id: string
   program_id: string
+  // The rate in effect on this date is the one that applies (R8, 0027).
+  entry_date: string
   hours: number | null
   flat_amount: number | null
   programs: { entry_mode: string } | null
 }
 
-export type RateRow = { coach_id: string; program_id: string; hourly_rate: number }
+export type RateRow = {
+  coach_id: string
+  program_id: string
+  hourly_rate: number
+  // R8 (0027_rate_history.sql): a rate applies from effective_from (null =
+  // since the beginning) through effective_to (null = ongoing). A rate change
+  // closes the old row and starts a new one, so earlier entries keep the
+  // rate that applied when they happened.
+  effective_from?: string | null
+  effective_to?: string | null
+  is_active?: boolean
+}
+
+// (coachId, programId, date) -> the rate in effect that day, if any.
+export type RateLookup = (coachId: string, programId: string, date: string) => RateRow | undefined
+
+export function buildRateLookup(rates: RateRow[]): RateLookup {
+  const byKey = new Map<string, RateRow[]>()
+  for (const r of rates) {
+    if (r.is_active === false) continue
+    const key = `${r.coach_id}|${r.program_id}`
+    byKey.set(key, [...(byKey.get(key) ?? []), r])
+  }
+  return (coachId, programId, date) =>
+    byKey
+      .get(`${coachId}|${programId}`)
+      ?.find((r) => (!r.effective_from || r.effective_from <= date) && (!r.effective_to || date <= r.effective_to))
+}
 export type OneVOneRateRow = { coach_id: string; session_fee: number }
 
 // How an amount was arrived at -- saved on the entry as paid_rate_basis
@@ -38,7 +67,7 @@ const cents = (n: number) => Math.round(n * 100) / 100
 // type's rate, and never a silent $0 when neither exists.
 export function computeAmount(
   entry: PayrollEntry,
-  ratesByCoachProgram: Map<string, RateRow>,
+  rateFor: RateLookup,
   coachingProgramId: string | undefined,
   oneVOneByCoach: Map<string, OneVOneRateRow>,
 ): AmountResult {
@@ -51,11 +80,11 @@ export function computeAmount(
   }
 
   if (entry.hours != null) {
-    const exact = ratesByCoachProgram.get(`${entry.coach_id}|${entry.program_id}`)
+    const exact = rateFor(entry.coach_id, entry.program_id, entry.entry_date)
     if (exact) {
       return { amount: cents(entry.hours * exact.hourly_rate), missingRate: false, rate: exact.hourly_rate, basis: 'exact' }
     }
-    const fallback = coachingProgramId ? ratesByCoachProgram.get(`${entry.coach_id}|${coachingProgramId}`) : undefined
+    const fallback = coachingProgramId ? rateFor(entry.coach_id, coachingProgramId, entry.entry_date) : undefined
     if (fallback) {
       return {
         amount: cents(entry.hours * fallback.hourly_rate),

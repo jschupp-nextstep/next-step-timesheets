@@ -8,6 +8,7 @@ import { supabaseClient } from '../../utility/supabaseClient'
 import { coachIdOf, type Identity } from '../../providers/authProvider'
 import { EntryThread } from '../../components/EntryThread'
 import { ADMIN_FLAG_LABEL } from '../../utility/entryFlags'
+import { CANCELLATION_TIMING_LABEL } from '../../utility/scheduleChanges'
 import type { AdminFlag } from '../../utility/payrollFilters'
 import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
 
@@ -22,6 +23,7 @@ type EventAssignmentRow = {
     end_time: string | null
     session_name: string | null
     is_cancelled: boolean
+    cancellation_timing: string | null
     programs: { name: string } | null
     locations: { name: string } | null
   } | null
@@ -145,7 +147,7 @@ export const MySessions = () => {
     resource: 'event_assignments',
     meta: {
       select:
-        'id, event_id, coach_confirmed_at, events!inner(id, event_date, start_time, end_time, session_name, is_cancelled, programs(name), locations(name))',
+        'id, event_id, coach_confirmed_at, events!inner(id, event_date, start_time, end_time, session_name, is_cancelled, cancellation_timing, programs(name), locations(name))',
     },
     filters: [
       { field: 'coach_id', operator: 'eq', value: coachId },
@@ -230,7 +232,9 @@ export const MySessions = () => {
     () =>
       assignments
         .filter(
-          (a) => a.events && !a.events.is_cancelled && a.events.event_date > today && !loggedEventIds.has(a.event_id),
+          // R6: cancelled sessions stay listed (shown as cancelled) so a coach
+          // can see a session was called off rather than it just vanishing.
+          (a) => a.events && a.events.event_date > today && !loggedEventIds.has(a.event_id),
         )
         .map((a) => ({ ...a.events!, assignmentId: a.id, coachConfirmedAt: a.coach_confirmed_at }))
         .sort((a, b) => a.event_date.localeCompare(b.event_date)),
@@ -323,7 +327,10 @@ export const MySessions = () => {
                 />
                 <Table.Column
                   title="Actions"
-                  render={(_, row: UpcomingRow) => (
+                  render={(_, row: UpcomingRow) =>
+                    row.is_cancelled ? (
+                      <Tag color="red">{CANCELLATION_TIMING_LABEL[row.cancellation_timing ?? ''] ?? 'Cancelled'}</Tag>
+                    ) : (
                     <Space>
                       {row.coachConfirmedAt ? (
                         <Tag color="green">Confirmed</Tag>
@@ -345,7 +352,8 @@ export const MySessions = () => {
                         </Button>
                       )}
                     </Space>
-                  )}
+                    )
+                  }
                 />
               </Table>
             )}

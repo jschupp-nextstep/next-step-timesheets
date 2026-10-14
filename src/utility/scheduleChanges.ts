@@ -45,3 +45,16 @@ export function describeChange(change: ScheduleChangeRow, coachName: (id: string
       return 'Created the session'
   }
 }
+
+// R6 (0028): when a cancellation happened.
+export type CancellationTiming = 'in_advance' | 'same_day' | 'after_arrival'
+export const CANCELLATION_TIMING_LABEL: Record<string, string> = {
+  in_advance: 'Cancelled in advance',
+  same_day: 'Cancelled same day',
+  after_arrival: 'Cancelled after arrival',
+}
+export const CANCELLATION_TIMING_OPTIONS = [
+  { value: 'in_advance', label: 'In advance' },
+  { value: 'same_day', label: 'Same day (before arrival)' },
+  { value: 'after_arrival', label: 'After coaches arrived' },
+]
