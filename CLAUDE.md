@@ -276,8 +276,9 @@ with no equivalent need here.
 Found 2026-10-12: only 1 of 61 active coaches (TEST COACH) has an email on the roster, so
 coaches aren't actually logging in yet — the app's real use so far is admin-side.
 
-- [ ] **Custom SMTP for Supabase Auth email** (e.g. Resend). The built-in sender is capped at
-  ~2–4 emails/hour; 60 coaches requesting magic links on launch day would hit it.
+- [x] **Custom SMTP for Supabase Auth email** — Resend, verified sending domain
+  `payroll.next-step-training.com`; auth email rate limit raised to 150/hour; confirmed delivering to
+  an address outside Justin's own (2026-10-14).
 - [ ] **Collect coach emails** (Name,Email CSV) and run `scripts/provision-coach-logins.mjs` —
   dry run by default, `--apply` to write. Sets `coaches.email` (lowercased, name-matched exactly,
   unmatched names listed never guessed) and creates pre-confirmed Auth users with no email sent.
