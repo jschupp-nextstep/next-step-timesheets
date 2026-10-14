@@ -16,6 +16,8 @@ export type ScheduleChangeRow = {
   changed_by_role: 'admin' | 'scheduler'
   changed_at: string
   review_status: 'needs_review' | 'reviewed' | 'reversed'
+  // 0029: a scheduler filling an unstaffed future session -- logged, not reviewed
+  routine?: boolean
 }
 
 export const formatTime = (t: string | null) => (t ? dayjs(`2000-01-01T${t}`).format('h:mm A') : '?')

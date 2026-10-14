@@ -261,6 +261,7 @@ export const ScheduleEvent = () => {
                     <Typography.Text strong>{describeChange(c, coachName)}</Typography.Text>
                     {c.review_status === 'needs_review' && <Tag color="gold">Needs review</Tag>}
                     {c.review_status === 'reversed' && <Tag>Reversed</Tag>}
+                    {c.routine && <Tag>Routine (no review needed)</Tag>}
                   </Space>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                     {c.changed_by_email} · {dayjs(c.changed_at).format('MMM D, h:mm A')}

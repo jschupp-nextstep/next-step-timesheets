@@ -188,7 +188,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9's code done 2026-10-14 (R9 still needs Luis's scheduler login set up) |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9 done 2026-10-14 (routine scheduler adds skip review; Luis's scheduler login deferred — Justin schedules AP himself for now) |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -227,7 +227,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0028`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0029`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -1082,9 +1082,15 @@ while any flagged session is unpaid. Flags only; never blocks payment by itself.
 (multi-coach, one logged `schedule_add` each); review queue → "Mark all reviewed" for routine
 batches (a weekly AP roster otherwise means one review per session, and each unreviewed change
 holds that session's pay). **Still to do (setup, not code):** Luis's Auth user + a scheduler row
-with an "Annual Program" rule. **Open question for Justin:** should a scheduler's assignment to a
-not-yet-staffed *future* session count as routine (auto-reviewed), with only day-of/after-the-fact
-changes held? Kept as "everything reviewed" for now.
+with an "Annual Program" rule — **on hold:** Justin is doing AP scheduling himself for now (as an
+admin; admin changes are never queued). **Routine adds (`0029_routine_scheduler_adds.sql`,
+Justin 2026-10-14):** a scheduler's `schedule_add` to a session dated after today (Eastern), not
+cancelled, whose current coaches were all put there by routine adds, is logged with
+`schedule_changes.routine = true` and `reviewed` — no review, no pay hold; the event history tags
+it "Routine (no review needed)". Subs, removals, time/cancel changes, adding to a session someone
+else staffed, and anything today or earlier still need review. Event creation with coaches still
+goes to review (not asked). Self-check: `supabase/checks/0029_routine_adds_check.sql` (runs as a
+pretend scheduler and rolls itself back).
 
 **Bug found and fixed (pre-existing):** Refine's supabase provider turns `{ operator: 'nnull',
 value: true }` into `IS TRUE`, which errors on a uuid column — so the query silently returned
