@@ -188,7 +188,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 next; R5, R6, R9 and the rest of R8 (rate effective dates, adjustments) not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, R9 and the rest of R8 (rate effective dates, adjustments) not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -227,7 +227,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0025`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0026`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -993,3 +993,45 @@ Sargent 9v9) are real data and were kept.
   posting as admin → 403; replying on a non-held entry → refused; writing `entry_messages`
   directly → permission denied. Back as admin: "Coach replied", Release (with note) moved the
   entry into the Payment Due totals. Test entries deleted, TEST COACH re-deactivated.
+
+### Done: R7 — weekly-rate coaches (2026-10-14, `0026_weekly_rates.sql`)
+
+Decisions (Justin, 2026-10-14): a weekly rate covers either **all of a coach's work or one
+program** (chosen per rate; anything not covered stays hourly); a week is paid **in full by
+default, amount editable when paying** (a changed amount needs a note); **only weeks with logged
+sessions appear as owed**; Prince's weeks start Saturday, Hayley's Monday (`week_start_dow`).
+
+- `weekly_rates` (coach, program or null = all work, `weekly_amount`, `week_start_dow` 0=Sun…6=Sat,
+  `effective_from`/`effective_to`) — admin screen `/weekly-rates`. `weekly_payments` (one row per
+  paid coach-week: amount, `standard_amount`, note, paid date; unique per rate+week) holds the
+  money. Paying a week marks its sessions `paid` with `paid_rate_basis = 'weekly'`, `paid_amount =
+  0`, and `weekly_payment_id` — the money is on the week, not split across sessions, which keeps
+  0024's "paid always carries an amount" rule honest. Coaches can read their own weekly payments.
+- `pay_weekly(rate, week_start, amount, note, entry_ids, paid_date)` — admin-only, all-or-nothing:
+  week_start must be the rate's start day, the rate must be in effect, a non-standard amount needs
+  a note, a week can't be paid twice; also used to **pay in advance** (no entries).
+  `attach_weekly_entries(payment, entry_ids)` links sessions logged after their week was paid.
+  Neither `weekly_payments` nor `weekly_rates`-with-payments can be deleted through the API.
+- `src/utility/weeklyPay.ts`: `weekStartFor`, `weeklyRateFor` (program rate beats all-work rate;
+  effective dates respected), `splitWeekly` (hourly vs one line per coach-week). Used by Payment
+  Due and the Zoho export so they agree.
+- Payment Due: covered sessions leave the hourly table; **"Weekly pay"** card — one line per
+  coach-week, Pay week… (amount pre-filled, note required if changed), Attach N new sessions for
+  a week already paid, "Pay a week in advance…"; Paid history lists paid weeks. Zoho export:
+  each unpaid week exported at the weekly amount. Coach Paid history: "Weekly pay: $X for M/D–M/D"
+  instead of $0.
+- **Fixed in passing:** "Mark all paid"/weekly pay advanced `paid_through_date` to the selected
+  range's end even when that was in the future (seen live: paid through jumped to Oct 20 on Oct
+  14). Now capped at today.
+- Tests: 52 (`npm test`), incl. the doc's case — Prince's Sat 9/19–Fri 9/25 sessions group into one
+  $1,100 line — plus Sat–Fri/Mon–Sun boundaries, effective dates, program-vs-all-work precedence.
+- Verified live 2026-10-14 (test rate for TEST COACH: $1,100, all work, Saturday weeks, from
+  10/1): three sessions in Sat 10/10–Fri 10/16 left the hourly table and showed as one "$1100.00"
+  week line; Zoho showed TEST COACH 3 entries $1100.00; wrong start day, changed amount without a
+  note, and a week before the rate began were each refused with nothing changed; Pay week (amount
+  pre-filled 1100) created the payment and marked the 3 sessions paid $0 `weekly`, linked; paying
+  10/17–10/23 in advance worked, paying it again → "This week has already been paid."; a session
+  logged afterward showed "Attach 1 new session(s)" and attached; Paid history listed both weeks.
+  **Not seen on screen:** the coach's "Weekly pay" line in My Sessions, and the paid-through cap
+  (logic changed after the run that exposed it). Test sessions deleted and paid-through reset in
+  the app; the 2 test `weekly_payments` + the test rate were removed by SQL (no API delete path).

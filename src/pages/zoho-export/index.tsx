@@ -5,6 +5,7 @@ import { Link } from 'react-router'
 import dayjs from 'dayjs'
 
 import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
+import { splitWeekly, type WeeklyPayment, type WeeklyRate } from '../../utility/weeklyPay'
 import { useAppSettings } from '../../utility/appSettings'
 import {
   isPreCutoverExcluded,
@@ -166,18 +167,29 @@ export const ZohoExport = () => {
     [reimbursementEntries],
   )
 
+  // R7: weekly-rate coaches export one amount per unpaid week, not their
+  // sessions' hours -- the same split Payment Due shows (weeklyPay.ts).
+  const { result: weeklyRatesResult } = useList<WeeklyRate>({ resource: 'weekly_rates', pagination: { pageSize: 200 } })
+  const { result: weeklyPaymentsResult } = useList<WeeklyPayment>({ resource: 'weekly_payments', pagination: { pageSize: 2000 } })
+  const { hourly1099, owedWeeks } = useMemo(() => {
+    const split = splitWeekly(entries1099, weeklyRatesResult?.data ?? [], weeklyPaymentsResult?.data ?? [])
+    return { hourly1099: split.hourly, owedWeeks: split.weeks.filter((w) => !w.payment) }
+  }, [entries1099, weeklyRatesResult?.data, weeklyPaymentsResult?.data])
+
   const computed = useMemo(
     () =>
-      entries1099.map((entry) => ({
+      hourly1099.map((entry) => ({
         entry,
         ...computeAmount(entry, ratesByCoachProgram, coachingProgramId, oneVOneByCoach),
       })),
-    [entries1099, ratesByCoachProgram, coachingProgramId, oneVOneByCoach],
+    [hourly1099, ratesByCoachProgram, coachingProgramId, oneVOneByCoach],
   )
 
   const included = computed.filter((c) => !c.missingRate)
   const flagged = computed.filter((c) => c.missingRate)
-  const total = included.reduce((sum, c) => sum + c.amount, 0)
+  const weeklyTotal = owedWeeks.reduce((sum, w) => sum + w.rate.weekly_amount, 0)
+  const total = included.reduce((sum, c) => sum + c.amount, 0) + weeklyTotal
+  const hasCoachLabor = included.length > 0 || owedWeeks.length > 0
 
   // Per-coach breakdown shown on screen for review -- Zoho itself only
   // gets the pooled total (per the bookkeeping reference, individual 1099
@@ -192,8 +204,14 @@ export const ZohoExport = () => {
       existing.count += 1
       map.set(key, existing)
     }
+    for (const w of owedWeeks) {
+      const existing = map.get(w.rate.coach_id) ?? { coachName: w.entries[0]?.coaches?.name ?? 'Unknown', amount: 0, count: 0 }
+      existing.amount += w.rate.weekly_amount
+      existing.count += w.entries.length
+      map.set(w.rate.coach_id, existing)
+    }
     return Array.from(map.values()).sort((a, b) => a.coachName.localeCompare(b.coachName))
-  }, [computed])
+  }, [computed, owedWeeks])
 
   // Both journal entries below can be generated for the same date range, so
   // each needs its own suffix -- 01 for coach labor, 02 for reimbursements
@@ -204,14 +222,14 @@ export const ZohoExport = () => {
   const rangeLabel = `${range[0].format('MMM D, YYYY')} – ${range[1].format('MMM D, YYYY')}`
 
   const generate = () => {
-    if (included.length === 0 && reimbursementEntries.length === 0) {
+    if (!hasCoachLabor && reimbursementEntries.length === 0) {
       message.warning('Nothing to export -- no eligible entries in this range.')
       return
     }
     const journalDate = range[1].format('YYYY-MM-DD')
     const rows: ZohoRow[] = []
 
-    if (included.length > 0) {
+    if (hasCoachLabor) {
       const shared = {
         'Journal Date': journalDate,
         'Reference Number': `1099 Coach Pay — ${range[0].format('MMM YYYY')}`,
@@ -367,7 +385,7 @@ export const ZohoExport = () => {
         <Space style={{ marginTop: 16 }}>
           <Button
             type="primary"
-            disabled={included.length === 0 && reimbursementEntries.length === 0}
+            disabled={!hasCoachLabor && reimbursementEntries.length === 0}
             onClick={generate}
           >
             Download Zoho CSV

@@ -65,6 +65,11 @@ const ScheduleEvent = lazy(() =>
   import('./pages/schedule-event').then((m) => ({ default: m.ScheduleEvent })),
 )
 const Schedule = lazy(() => import('./pages/scheduler/schedule').then((m) => ({ default: m.Schedule })))
+const WeeklyRateList = lazy(() => import('./pages/weekly-rates/list').then((m) => ({ default: m.WeeklyRateList })))
+const WeeklyRateCreate = lazy(() =>
+  import('./pages/weekly-rates/create').then((m) => ({ default: m.WeeklyRateCreate })),
+)
+const WeeklyRateEdit = lazy(() => import('./pages/weekly-rates/edit').then((m) => ({ default: m.WeeklyRateEdit })))
 const Settings = lazy(() => import('./pages/settings').then((m) => ({ default: m.Settings })))
 
 const SprocketImport = lazy(() =>
@@ -146,6 +151,11 @@ const AdminRoutes = () => (
         <Route index element={<RateList />} />
         <Route path="create" element={<RateCreate />} />
         <Route path="edit/:id" element={<RateEdit />} />
+      </Route>
+      <Route path="/weekly-rates">
+        <Route index element={<WeeklyRateList />} />
+        <Route path="create" element={<WeeklyRateCreate />} />
+        <Route path="edit/:id" element={<WeeklyRateEdit />} />
       </Route>
       <Route path="/one-v-one-rates">
         <Route index element={<OneVOneRateList />} />
@@ -344,6 +354,13 @@ function App() {
                   create: '/rates/create',
                   edit: '/rates/edit/:id',
                   meta: { label: 'Rates' },
+                },
+                {
+                  name: 'weekly_rates',
+                  list: '/weekly-rates',
+                  create: '/weekly-rates/create',
+                  edit: '/weekly-rates/edit/:id',
+                  meta: { label: 'Weekly Rates' },
                 },
                 {
                   name: 'one_v_one_rates',

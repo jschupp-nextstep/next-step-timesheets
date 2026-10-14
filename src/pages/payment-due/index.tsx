@@ -20,6 +20,8 @@ import {
 import { EntryFlagActions } from '../../components/EntryFlagActions'
 import { EntryThread } from '../../components/EntryThread'
 import { ADMIN_FLAG_LABEL, threadState, type EntryMessage } from '../../utility/entryFlags'
+import { splitWeekly, type WeeklyPayment } from '../../utility/weeklyPay'
+import { WeeklyPaidHistory, WeeklyPayCard, type WeeklyRateWithNames } from './WeeklyPayCard'
 
 type EntryRow = {
   id: string
@@ -155,13 +157,35 @@ export const PaymentDue = () => {
     [programsResult?.data],
   )
 
+  // R7: weekly-rate coaches' entries come out of the hourly table and are
+  // shown one line per coach-week instead (WeeklyPayCard).
+  const { result: weeklyRatesResult } = useList<WeeklyRateWithNames>({
+    resource: 'weekly_rates',
+    meta: { select: '*, coaches(name), programs(name)' },
+    pagination: { pageSize: 200 },
+  })
+  const { result: weeklyPaymentsResult, query: weeklyPaymentsQuery } = useList<WeeklyPayment>({
+    resource: 'weekly_payments',
+    pagination: { pageSize: 2000 },
+  })
+  const weeklyRates = useMemo(() => weeklyRatesResult?.data ?? [], [weeklyRatesResult?.data])
+  const { hourlyEntries, weeks } = useMemo(() => {
+    if (statusFilter === 'paid') {
+      // Weekly-paid sessions carry $0 (the money is on the week); keep them
+      // out of the hourly paid table.
+      return { hourlyEntries: entries.filter((e) => e.paid_rate_basis !== 'weekly'), weeks: [] }
+    }
+    const split = splitWeekly(entries, weeklyRates, weeklyPaymentsResult?.data ?? [])
+    return { hourlyEntries: split.hourly, weeks: split.weeks }
+  }, [entries, weeklyRates, weeklyPaymentsResult?.data, statusFilter])
+
   const programNamesById = useMemo(() => {
     const map = new Map<string, string>()
-    for (const entry of entries) {
+    for (const entry of hourlyEntries) {
       if (entry.programs) map.set(entry.program_id, entry.programs.name)
     }
     return map
-  }, [entries])
+  }, [hourlyEntries])
 
   const programColumns = useMemo(
     () =>
@@ -173,7 +197,7 @@ export const PaymentDue = () => {
 
   const summaryRows = useMemo(() => {
     const byCoach = new Map<string, CoachSummaryRow>()
-    for (const entry of entries) {
+    for (const entry of hourlyEntries) {
       if (!byCoach.has(entry.coach_id)) {
         byCoach.set(entry.coach_id, {
           coachId: entry.coach_id,
@@ -212,7 +236,7 @@ export const PaymentDue = () => {
       row.entryIds.push(entry.id)
     }
     return Array.from(byCoach.values()).sort((a, b) => a.coachName.localeCompare(b.coachName))
-  }, [entries, ratesByCoachProgram, coachingProgramId, oneVOneByCoach, statusFilter])
+  }, [hourlyEntries, ratesByCoachProgram, coachingProgramId, oneVOneByCoach, statusFilter])
 
   // Once every payable entry in the range is paid, that range is done --
   // advance paid_through_date so next time Payment Due opens on the next
@@ -225,7 +249,12 @@ export const PaymentDue = () => {
     // would drop them out of the next default range.
     const remaining = entries.filter((e) => !justPaidIds.includes(e.id))
     if (remaining.length > 0 || held.length > 0 || onHold.length > 0) return
-    const end = range[1].format('YYYY-MM-DD')
+    // Never past today: a range ending in the future (e.g. after paying a
+    // week in advance) would otherwise push the next default range past
+    // days whose sessions haven't been logged yet.
+    const today = dayjs().format('YYYY-MM-DD')
+    const rangeEnd = range[1].format('YYYY-MM-DD')
+    const end = rangeEnd < today ? rangeEnd : today
     if (paidThroughDate && paidThroughDate >= end) return
     const { error } = await supabaseClient
       .from('app_settings')
@@ -235,7 +264,7 @@ export const PaymentDue = () => {
       message.warning(`Paid, but couldn't update the paid-through date: ${error.message}`)
       return
     }
-    message.info(`Everything through ${range[1].format('MMM D')} is paid -- that's now the paid-through date.`)
+    message.info(`Everything through ${dayjs(end).format('MMM D')} is paid -- that's now the paid-through date.`)
     refetchSettings()
   }
 
@@ -480,6 +509,27 @@ export const PaymentDue = () => {
           bordered
         />
       </Card>
+
+      {statusFilter === 'paid' && (
+        <WeeklyPaidHistory
+          payments={(weeklyPaymentsResult?.data ?? []).filter(
+            (p) => p.week_start <= range[1].format('YYYY-MM-DD') && p.week_end >= range[0].format('YYYY-MM-DD'),
+          )}
+          rates={weeklyRates}
+        />
+      )}
+
+      {statusFilter === 'pending' && (weeks.length > 0 || weeklyRates.length > 0) && (
+        <WeeklyPayCard
+          weeks={weeks}
+          rates={weeklyRates}
+          onPaid={async (ids) => {
+            weeklyPaymentsQuery.refetch()
+            await maybeAdvancePaidThrough(ids)
+            query.refetch()
+          }}
+        />
+      )}
 
       {statusFilter === 'pending' && onHold.length > 0 && (
         <Card size="small" style={{ marginTop: 16 }} title={`On hold (${onHold.length})`}>

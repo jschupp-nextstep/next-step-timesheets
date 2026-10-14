@@ -92,6 +92,8 @@ type TimesheetEntryRow = {
   paid_amount: number | null
   admin_flag: AdminFlag | null
   admin_flag_reason: string | null
+  paid_rate_basis: string | null
+  weekly_payment_id: string | null
   session_name: string | null
   notes: string | null
   status: 'pending' | 'paid'
@@ -239,6 +241,17 @@ export const MySessions = () => {
   // R4: entries Next Step put on hold with a question for this coach.
   const heldEntries = useMemo(() => pendingEntries.filter((e) => e.admin_flag === 'hold'), [pendingEntries])
   const paidEntries = useMemo(() => entries.filter((e) => e.status === 'paid'), [entries])
+  // R7: sessions paid as part of a weekly rate carry $0 themselves; show the
+  // week's payment instead (coaches can read their own weekly_payments).
+  const { result: weeklyPaymentsResult } = useList<{ id: string; week_start: string; week_end: string; amount: number }>({
+    resource: 'weekly_payments',
+    pagination: { pageSize: 500 },
+    queryOptions: { enabled: !!coachId },
+  })
+  const weeklyPaymentById = useMemo(
+    () => new Map((weeklyPaymentsResult?.data ?? []).map((p) => [p.id, p])),
+    [weeklyPaymentsResult?.data],
+  )
 
   const isLoading = assignmentsQuery.isLoading || entriesQuery.isLoading
 
@@ -572,11 +585,17 @@ export const MySessions = () => {
               />
               <Table.Column
                 title="Amount"
-                render={(_, row: TimesheetEntryRow) =>
+                render={(_, row: TimesheetEntryRow) => {
+                  if (row.paid_rate_basis === 'weekly') {
+                    const week = row.weekly_payment_id ? weeklyPaymentById.get(row.weekly_payment_id) : undefined
+                    return week
+                      ? `Weekly pay: $${week.amount.toFixed(2)} for ${dayjs(week.week_start).format('M/D')}–${dayjs(week.week_end).format('M/D')}`
+                      : 'Weekly pay'
+                  }
                   // What was actually paid, saved at payment (R8); older
                   // entries fall back to the flat amount, if any.
-                  row.paid_amount != null ? `$${row.paid_amount.toFixed(2)}` : formatAmount(row)
-                }
+                  return row.paid_amount != null ? `$${row.paid_amount.toFixed(2)}` : formatAmount(row)
+                }}
               />
               <Table.Column
                 title="Paid"

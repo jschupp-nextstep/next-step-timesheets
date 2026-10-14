@@ -19,7 +19,9 @@ export type OneVOneRateRow = { coach_id: string; session_fee: number }
 // How an amount was arrived at -- saved on the entry as paid_rate_basis
 // (0024_paid_amounts.sql), so a Coaching-rate fallback stays visible after
 // payment. 'manual' is only ever set by an admin overriding on Edit Entry.
-export type PaidRateBasis = 'exact' | 'coaching_fallback' | 'flat' | 'one_v_one' | 'manual'
+// 'weekly' (R7, 0026): paid as part of a weekly-rate week; the entry carries
+// $0 and the money is on its weekly_payments row.
+export type PaidRateBasis = 'exact' | 'coaching_fallback' | 'flat' | 'one_v_one' | 'manual' | 'weekly'
 
 export type AmountResult = {
   amount: number
@@ -76,4 +78,5 @@ export const PAID_RATE_BASIS_LABEL: Record<PaidRateBasis, string> = {
   flat: 'Flat amount',
   one_v_one: '1v1 session fee',
   manual: 'Set by admin',
+  weekly: 'Weekly rate',
 }
