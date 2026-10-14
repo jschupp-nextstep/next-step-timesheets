@@ -188,7 +188,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
-| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4–R7, R9 and the rest of R8 (rate effective dates, adjustments) not started |
+| 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 next; R5, R6, R9 and the rest of R8 (rate effective dates, adjustments) not started |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -227,7 +227,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0024`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0025`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -282,10 +282,10 @@ coaches aren't actually logging in yet — the app's real use so far is admin-si
   dry run by default, `--apply` to write. Sets `coaches.email` (lowercased, name-matched exactly,
   unmatched names listed never guessed) and creates pre-confirmed Auth users with no email sent.
   Needs `SUPABASE_SERVICE_ROLE_KEY` as an env var for that run only — never in `.env.local`.
-- [ ] **Create real pay periods** (`/pay-periods`). Found 2026-10-13: the table is **empty**, so
-  every date classifies as Band C — no coach can log or "Confirm hours" on a calendar session at
-  all, only file an `unstructured` claim. Needs at least the current period (and ideally 3 back)
-  before go-live.
+- [x] **Pay periods created** 2026-10-13 (Justin's spec: two weeks, Monday–Sunday, first new one
+  starting Mon 10/19): 10/5–10/18 (covers the 10/7 cutover), then 10/19–11/1 through
+  12/28–1/10/2027. Before this the table was empty, so every date was Band C and no coach could log
+  or Confirm hours on a calendar session. **Add 2027 periods before 1/10/2027.**
 - "Allow new users to sign up" is **off** in Supabase Auth (turned off 2026-10-12), so every login
   must be created deliberately: the script above, or Authentication → Users → Add user.
 
@@ -960,3 +960,36 @@ Sargent 9v9) are real data and were kept.
   and overriding to $130 saved basis `manual`. Test entries/rates deleted, paid-through reset to
   Oct 6. **Not seen on screen:** the coach Paid history columns (TEST COACH had no paid entries
   left to show).
+
+### Done: R4 — entry flags and admin↔coach questions (2026-10-14, `0025_entry_flags.sql`)
+
+- **`timesheet_entries.admin_flag`** (`hold` / `canceled` / `not_next_step`) + `admin_flag_reason`
+  + `admin_flagged_at` — a separate column rather than new `status` values, because `status`
+  ('pending'/'paid') is what ~16 RLS policies and most screens key off. **Payable = pending AND no
+  flag.** Admin-only (trigger `protect_admin_flag` reverts a non-admin's write).
+- Coaches can't edit or delete a flagged entry (Justin: reply only) — added `admin_flag is null`
+  to the coach update/delete policies.
+- **`entry_messages`**: append-only thread (admin reads all, coach reads own entries', no direct
+  writes). Functions: `hold_entry(entry, question)` (question required, sets hold + posts it),
+  `flag_entry(entry, 'canceled'|'not_next_step', reason)` (reason required — the coach sees it),
+  `clear_entry_flag(entry, note?)` (release; optional note posted), `admin_entry_message`,
+  `coach_reply_entry` (own entry, only while on hold). Only pending entries can be flagged.
+  `mark_entries_paid` also refuses flagged entries.
+- Shared partition: new `onHold` (in-range holds) and `excluded` (canceled/not NS, any date — never
+  counted as owed) buckets; held entries block paid-through from advancing. Payment Due: "On hold"
+  card (thread, "Awaiting coach"/"Coach replied", reply, Release, Edit entry) and a collapsed
+  "Excluded" list. Zoho export skips flagged entries. Timesheet Entries list: flag tag + Hold… /
+  Canceled… / Not NS… / Release per row (`EntryFlagActions`). Coach My Sessions: "Questions from
+  Next Step" card with the thread and a reply box; flagged entries show "On hold" or "Not paid:
+  canceled/not next step — reason" in place of Edit/Delete (Justin: coaches see the reason).
+- `useEntryAction()` alongside `useScheduleAction()` (same always-show-the-error contract).
+- Tests: 45 (`npm test`), incl. 3 for the flag buckets.
+- Verified live 2026-10-13/14: hold without a question, double hold, and canceled without a reason
+  → refused with clear messages; Mark all paid on a canceled entry → refused; Payment Due totals
+  empty with all three flagged, "On hold (1) … Awaiting coach" and "Excluded (2)"; Zoho had none of
+  them; Clear flag / Not NS… dialogs worked from the Entries list. As (temporarily reactivated)
+  TEST COACH: the question card showed and a reply was sent; canceled/not-NS showed their reasons
+  with no Edit/Delete; direct edit/delete of flagged entries matched 0 rows; clearing a flag or
+  posting as admin → 403; replying on a non-held entry → refused; writing `entry_messages`
+  directly → permission denied. Back as admin: "Coach replied", Release (with note) moved the
+  entry into the Payment Due totals. Test entries deleted, TEST COACH re-deactivated.

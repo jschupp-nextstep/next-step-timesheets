@@ -15,10 +15,14 @@ export type PayrollRange = [Dayjs, Dayjs]
 
 export type CutoverResolution = 'paid_in_sheets' | 'still_owed'
 
+export type AdminFlag = 'hold' | 'canceled' | 'not_next_step'
+
 export type PayrollFilterEntry = {
   entry_date: string
   admin_entered: boolean
   cutover_resolution: CutoverResolution | null
+  // R4 (0025): payable = pending AND no admin flag.
+  admin_flag?: AdminFlag | null
 }
 
 // Pre-cutover entries were paid in the old Sheets system -- excluded from
@@ -32,9 +36,11 @@ export function isPreCutoverExcluded(entry: PayrollFilterEntry, cutoverDate: str
 // Splits pending entries for Payment Due: `payable` is exactly what the
 // table shows and what "Mark all paid" may touch; `preCutover` is exactly
 // what the cleanup card lists; `held` is in-range entries on an event with
-// a schedule change still awaiting review (R2c payroll hold). Every entry
-// lands in exactly one bucket, and nothing dated on or after cutover can
-// ever land in `preCutover`.
+// a schedule change still awaiting review (R2c payroll hold); `onHold` is
+// in-range entries an admin put on Hold with a question (R4); `excluded` is
+// entries flagged Canceled / Not Next Step, whatever their date -- never
+// payable, never counted as owed. Every entry lands in exactly one bucket,
+// and nothing dated on or after cutover can ever land in `preCutover`.
 export function partitionPendingEntries<T extends PayrollFilterEntry & { event_id?: string | null }>(
   entries: T[],
   range: PayrollRange,
@@ -43,17 +49,21 @@ export function partitionPendingEntries<T extends PayrollFilterEntry & { event_i
 ) {
   const payable: T[] = []
   const held: T[] = []
+  const onHold: T[] = []
+  const excluded: T[] = []
   const preCutover: T[] = []
   const beforeRange: T[] = []
   const afterRange: T[] = []
   const start = range[0].format('YYYY-MM-DD')
   for (const entry of entries) {
     if (isPreCutoverExcluded(entry, cutoverDate)) preCutover.push(entry)
+    else if (entry.admin_flag === 'canceled' || entry.admin_flag === 'not_next_step') excluded.push(entry)
     else if (!inRange(entry.entry_date, range)) (entry.entry_date < start ? beforeRange : afterRange).push(entry)
+    else if (entry.admin_flag === 'hold') onHold.push(entry)
     else if (entry.event_id && heldEventIds.has(entry.event_id)) held.push(entry)
     else payable.push(entry)
   }
-  return { payable, held, preCutover, beforeRange, afterRange }
+  return { payable, held, onHold, excluded, preCutover, beforeRange, afterRange }
 }
 
 // Events with at least one scheduler change still awaiting review -- their

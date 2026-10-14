@@ -4,6 +4,9 @@ import { useDelete } from '@refinedev/core'
 import { Button, Popconfirm, Segmented, Select, Space, Table, Tag } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 
+import { AdminFlagTag, EntryFlagActions } from '../../components/EntryFlagActions'
+import type { AdminFlag } from '../../utility/payrollFilters'
+
 type EntryRow = {
   id: string
   entry_date: string
@@ -13,6 +16,7 @@ type EntryRow = {
   status: 'pending' | 'paid'
   paid_date: string | null
   cutover_resolution: string | null
+  admin_flag: AdminFlag | null
   coaches: { name: string } | null
   programs: { name: string } | null
 }
@@ -21,7 +25,7 @@ export const EntryList = () => {
   const [statusFilter, setStatusFilter] = useState<'pending' | 'paid' | 'all'>('all')
   const [coachId, setCoachId] = useState<string | undefined>(undefined)
 
-  const { tableProps, setFilters } = useTable<EntryRow>({
+  const { tableProps, setFilters, tableQuery } = useTable<EntryRow>({
     resource: 'timesheet_entries',
     meta: { select: '*, coaches(name), programs(name)' },
     sorters: { initial: [{ field: 'entry_date', order: 'desc' }] },
@@ -84,7 +88,9 @@ export const EntryList = () => {
           dataIndex="status"
           title="Status"
           render={(value: EntryRow['status'], row: EntryRow) =>
-            row.cutover_resolution === 'paid_in_sheets' ? (
+            row.admin_flag ? (
+              <AdminFlagTag flag={row.admin_flag} />
+            ) : row.cutover_resolution === 'paid_in_sheets' ? (
               <Tag color="purple">Paid in Sheets</Tag>
             ) : value === 'paid' ? (
               <Tag color="green">Paid {row.paid_date}</Tag>
@@ -99,6 +105,7 @@ export const EntryList = () => {
           render={(_, record: EntryRow) => (
             <Space>
               <EditButton hideText size="small" resource="timesheet_entries" recordItemId={record.id} />
+              <EntryFlagActions entry={record} onDone={() => tableQuery.refetch()} />
               <Popconfirm
                 title="Delete this entry?"
                 okText="Delete"

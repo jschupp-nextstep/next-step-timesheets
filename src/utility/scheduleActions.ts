@@ -32,16 +32,28 @@ export function scheduleErrorMessage(error: RpcError): string | null {
   return message
 }
 
-// The only way UI code should call a schedule_* function: it shows the
+// Entry flag/thread functions (R4, 0025_entry_flags.sql) -- same contract:
+// the database checks permission and raises a person-readable message.
+export type EntryFunction = 'hold_entry' | 'flag_entry' | 'clear_entry_flag' | 'admin_entry_message' | 'coach_reply_entry'
+
+// How UI code calls a permission-checking database function: it shows the
 // error (and returns false) on any failure, so no screen can silently
 // swallow a refusal.
 export function useScheduleAction() {
+  return useRpcAction<ScheduleFunction>()
+}
+
+export function useEntryAction() {
+  return useRpcAction<EntryFunction>()
+}
+
+function useRpcAction<F extends string>() {
   const { message } = App.useApp()
   const [running, setRunning] = useState(false)
 
   // successMessage null = no toast (the caller shows its own, e.g. swap
   // approval); errors are always shown regardless.
-  const run = async (fn: ScheduleFunction, args: Record<string, unknown>, successMessage: string | null) => {
+  const run = async (fn: F, args: Record<string, unknown>, successMessage: string | null) => {
     setRunning(true)
     try {
       const { error } = await supabaseClient.rpc(fn, args)

@@ -123,3 +123,27 @@ describe('payroll hold (held partition)', () => {
     expect(reviewed.payable).toHaveLength(2)
   })
 })
+
+describe('admin flags (R4)', () => {
+  const r = range('2026-10-07', '2026-10-20')
+  const plain = { ...entry('2026-10-09'), admin_flag: null }
+  const hold = { ...entry('2026-10-09'), admin_flag: 'hold' as const }
+  const canceled = { ...entry('2026-10-09'), admin_flag: 'canceled' as const }
+  const notNs = { ...entry('2026-10-10', { admin_entered: true }), admin_flag: 'not_next_step' as const }
+  const canceledOutOfRange = { ...entry('2026-10-25'), admin_flag: 'canceled' as const }
+  const holdOutOfRange = { ...entry('2026-10-25'), admin_flag: 'hold' as const }
+  const result = partitionPendingEntries([plain, hold, canceled, notNs, canceledOutOfRange, holdOutOfRange], r, CUTOVER)
+
+  it('never puts a flagged entry in the payable bucket', () => {
+    expect(result.payable.map((e) => e.id)).toEqual([plain.id])
+  })
+
+  it('lists in-range holds separately, so they can be answered and released', () => {
+    expect(result.onHold.map((e) => e.id)).toEqual([hold.id])
+  })
+
+  it('excludes Canceled and Not Next Step whatever their date, so they never count as owed', () => {
+    expect(result.excluded.map((e) => e.id)).toEqual([canceled.id, notNs.id, canceledOutOfRange.id])
+    expect(result.afterRange.map((e) => e.id)).toEqual([holdOutOfRange.id])
+  })
+})

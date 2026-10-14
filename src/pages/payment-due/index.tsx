@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { Alert, App, Button, Card, DatePicker, Popconfirm, Segmented, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, Collapse, DatePicker, Popconfirm, Segmented, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { Link } from 'react-router'
@@ -14,8 +14,12 @@ import {
   useHeldEventIds,
   partitionPendingEntries,
   usePayrollRange,
+  type AdminFlag,
   type CutoverResolution,
 } from '../../utility/payrollFilters'
+import { EntryFlagActions } from '../../components/EntryFlagActions'
+import { EntryThread } from '../../components/EntryThread'
+import { ADMIN_FLAG_LABEL, threadState, type EntryMessage } from '../../utility/entryFlags'
 
 type EntryRow = {
   id: string
@@ -28,6 +32,8 @@ type EntryRow = {
   status: 'pending' | 'paid'
   admin_entered: boolean
   cutover_resolution: CutoverResolution | null
+  admin_flag: AdminFlag | null
+  admin_flag_reason: string | null
   event_id: string | null
   paid_rate: number | null
   paid_amount: number | null
@@ -100,11 +106,13 @@ export const PaymentDue = () => {
 
   // Paid history is already range-filtered server-side; only the pre-cutover
   // exclusion applies there.
-  const { entries, held, preCutover, beforeRange, afterRange } = useMemo(() => {
+  const { entries, held, onHold, excluded, preCutover, beforeRange, afterRange } = useMemo(() => {
     if (statusFilter === 'paid') {
       return {
         entries: allEntries.filter((e) => !isPreCutoverExcluded(e, cutoverDate)),
         held: [],
+        onHold: [],
+        excluded: [],
         preCutover: [],
         beforeRange: [],
         afterRange: [],
@@ -113,6 +121,26 @@ export const PaymentDue = () => {
     const { payable, ...rest } = partitionPendingEntries(allEntries, range, cutoverDate, heldEventIds)
     return { entries: payable, ...rest }
   }, [allEntries, range, cutoverDate, statusFilter, heldEventIds])
+
+  // R4: the On hold card shows whether each question is still awaiting the
+  // coach or has a reply.
+  const onHoldIds = useMemo(() => onHold.map((e) => e.id), [onHold])
+  const { result: holdMessagesResult, query: holdMessagesQuery } = useList<EntryMessage>({
+    resource: 'entry_messages',
+    filters: [{ field: 'entry_id', operator: 'in', value: onHoldIds }],
+    sorters: [{ field: 'created_at', order: 'asc' }],
+    pagination: { pageSize: 1000 },
+    queryOptions: { enabled: onHoldIds.length > 0 },
+  })
+  const messagesByEntry = useMemo(() => {
+    const map = new Map<string, EntryMessage[]>()
+    for (const m of holdMessagesResult?.data ?? []) map.set(m.entry_id, [...(map.get(m.entry_id) ?? []), m])
+    return map
+  }, [holdMessagesResult?.data])
+  const refreshFlags = () => {
+    query.refetch()
+    holdMessagesQuery.refetch()
+  }
 
   const ratesByCoachProgram = useMemo(
     () => new Map((ratesResult?.data ?? []).map((r) => [`${r.coach_id}|${r.program_id}`, r])),
@@ -196,7 +224,7 @@ export const PaymentDue = () => {
     // Held entries count as unpaid in the range too -- advancing past them
     // would drop them out of the next default range.
     const remaining = entries.filter((e) => !justPaidIds.includes(e.id))
-    if (remaining.length > 0 || held.length > 0) return
+    if (remaining.length > 0 || held.length > 0 || onHold.length > 0) return
     const end = range[1].format('YYYY-MM-DD')
     if (paidThroughDate && paidThroughDate >= end) return
     const { error } = await supabaseClient
@@ -452,6 +480,72 @@ export const PaymentDue = () => {
           bordered
         />
       </Card>
+
+      {statusFilter === 'pending' && onHold.length > 0 && (
+        <Card size="small" style={{ marginTop: 16 }} title={`On hold (${onHold.length})`}>
+          <Typography.Paragraph type="secondary">
+            Entries you've asked the coach about. They aren't in the totals above until released.
+          </Typography.Paragraph>
+          <Collapse
+            size="small"
+            items={onHold.map((e) => {
+              const replied = threadState(messagesByEntry.get(e.id) ?? []) === 'replied'
+              return {
+                key: e.id,
+                label: (
+                  <Space wrap>
+                    <Typography.Text strong>{e.coaches?.name ?? '?'}</Typography.Text>
+                    <span>
+                      {dayjs(e.entry_date).format('M/D')} · {e.programs?.name ?? '—'}
+                      {e.session_name ? ` · ${e.session_name}` : ''} ·{' '}
+                      {e.flat_amount != null ? `$${e.flat_amount.toFixed(2)}` : `${e.hours?.toFixed(2) ?? '—'} hrs`}
+                    </span>
+                    {replied ? <Tag color="green">Coach replied</Tag> : <Tag color="gold">Awaiting coach</Tag>}
+                  </Space>
+                ),
+                children: (
+                  <>
+                    <EntryThread entryId={e.id} as="admin" canReply onPosted={refreshFlags} />
+                    <Space style={{ marginTop: 12 }} wrap>
+                      <EntryFlagActions entry={e} onDone={refreshFlags} />
+                      <Link to={`/entries/edit/${e.id}`}>Edit entry →</Link>
+                    </Space>
+                  </>
+                ),
+              }
+            })}
+          />
+        </Card>
+      )}
+
+      {statusFilter === 'pending' && excluded.length > 0 && (
+        <Collapse
+          size="small"
+          style={{ marginTop: 16 }}
+          items={[
+            {
+              key: 'excluded',
+              label: `Excluded -- Canceled / Not Next Step (${excluded.length}), never paid`,
+              children: (
+                <Table<EntryRow> dataSource={excluded} rowKey="id" size="small" pagination={false}>
+                  <Table.Column dataIndex="entry_date" title="Date" width={110} />
+                  <Table.Column title="Coach" render={(_, row: EntryRow) => row.coaches?.name ?? '—'} />
+                  <Table.Column title="Program" render={(_, row: EntryRow) => row.programs?.name ?? '—'} />
+                  <Table.Column
+                    title="Flag"
+                    render={(_, row: EntryRow) => (row.admin_flag ? ADMIN_FLAG_LABEL[row.admin_flag] : '—')}
+                  />
+                  <Table.Column dataIndex="admin_flag_reason" title="Reason" render={(v) => v || '—'} />
+                  <Table.Column
+                    title="Actions"
+                    render={(_, row: EntryRow) => <EntryFlagActions entry={row} onDone={refreshFlags} />}
+                  />
+                </Table>
+              ),
+            },
+          ]}
+        />
+      )}
 
       {statusFilter === 'pending' && preCutover.length > 0 && (
         <Card size="small" style={{ marginTop: 16 }} title={`Pending entries dated before cutover (${preCutover.length})`}>

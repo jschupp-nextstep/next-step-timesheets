@@ -6,7 +6,13 @@ import dayjs from 'dayjs'
 
 import { computeAmount, type OneVOneRateRow, type RateRow } from '../../utility/payroll'
 import { useAppSettings } from '../../utility/appSettings'
-import { isPreCutoverExcluded, useHeldEventIds, usePayrollRange, type CutoverResolution } from '../../utility/payrollFilters'
+import {
+  isPreCutoverExcluded,
+  useHeldEventIds,
+  usePayrollRange,
+  type AdminFlag,
+  type CutoverResolution,
+} from '../../utility/payrollFilters'
 
 type EntryRow = {
   id: string
@@ -20,6 +26,7 @@ type EntryRow = {
   admin_entered: boolean
   cutover_resolution: CutoverResolution | null
   event_id: string | null
+  admin_flag: AdminFlag | null
   coaches: { name: string; pay_type: '1099' | 'w2' } | null
   programs: { name: string; entry_mode: string } | null
 }
@@ -112,7 +119,8 @@ export const ZohoExport = () => {
   const payableEntries = useMemo(
     () =>
       (result?.data ?? []).filter(
-        (e) => !isPreCutoverExcluded(e, cutoverDate) && !(e.event_id && heldEventIds.has(e.event_id)),
+        // Also never export an entry on Hold / Canceled / Not Next Step (R4).
+        (e) => !isPreCutoverExcluded(e, cutoverDate) && !(e.event_id && heldEventIds.has(e.event_id)) && !e.admin_flag,
       ),
     [result?.data, cutoverDate, heldEventIds],
   )

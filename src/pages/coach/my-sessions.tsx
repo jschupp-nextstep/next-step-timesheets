@@ -6,6 +6,9 @@ import dayjs from 'dayjs'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import { coachIdOf, type Identity } from '../../providers/authProvider'
+import { EntryThread } from '../../components/EntryThread'
+import { ADMIN_FLAG_LABEL } from '../../utility/entryFlags'
+import type { AdminFlag } from '../../utility/payrollFilters'
 import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
 
 type EventAssignmentRow = {
@@ -87,6 +90,8 @@ type TimesheetEntryRow = {
   flat_amount: number | null
   paid_rate: number | null
   paid_amount: number | null
+  admin_flag: AdminFlag | null
+  admin_flag_reason: string | null
   session_name: string | null
   notes: string | null
   status: 'pending' | 'paid'
@@ -231,6 +236,8 @@ export const MySessions = () => {
   )
 
   const pendingEntries = useMemo(() => entries.filter((e) => e.status === 'pending'), [entries])
+  // R4: entries Next Step put on hold with a question for this coach.
+  const heldEntries = useMemo(() => pendingEntries.filter((e) => e.admin_flag === 'hold'), [pendingEntries])
   const paidEntries = useMemo(() => entries.filter((e) => e.status === 'paid'), [entries])
 
   const isLoading = assignmentsQuery.isLoading || entriesQuery.isLoading
@@ -439,6 +446,30 @@ export const MySessions = () => {
             </Card>
           )}
 
+          {heldEntries.length > 0 && (
+            <Card
+              title={`Questions from Next Step (${heldEntries.length})`}
+              style={{ marginBottom: 16, borderColor: '#faad14' }}
+              size="small"
+            >
+              <Typography.Paragraph type="secondary">
+                Next Step has a question about these sessions before paying them. Reply below -- they'll be paid once
+                it's sorted out.
+              </Typography.Paragraph>
+              {heldEntries.map((e) => (
+                <Card key={e.id} type="inner" size="small" style={{ marginBottom: 8 }} title={
+                  <span>
+                    {e.entry_date} · {e.programs?.name ?? '—'}
+                    {e.session_name ? ` · ${e.session_name}` : ''} ·{' '}
+                    {e.hours != null ? `${e.hours.toFixed(2)} hrs` : formatAmount(e)}
+                  </span>
+                }>
+                  <EntryThread entryId={e.id} as="coach" canReply />
+                </Card>
+              ))}
+            </Card>
+          )}
+
           <Card
             title="Logged, pending payment"
             size="small"
@@ -470,7 +501,21 @@ export const MySessions = () => {
                 <Table.Column title="Amount" render={(_, row: TimesheetEntryRow) => formatAmount(row)} />
                 <Table.Column
                   title="Actions"
-                  render={(_, row: TimesheetEntryRow) => (
+                  render={(_, row: TimesheetEntryRow) =>
+                    // Flagged entries are locked (RLS refuses edits/deletes, 0025):
+                    // show why instead of actions that would fail.
+                    row.admin_flag === 'hold' ? (
+                      <Tag color="gold">On hold -- see question above</Tag>
+                    ) : row.admin_flag ? (
+                      <Space direction="vertical" size={0}>
+                        <Tag>Not paid: {ADMIN_FLAG_LABEL[row.admin_flag].toLowerCase()}</Tag>
+                        {row.admin_flag_reason && (
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {row.admin_flag_reason}
+                          </Typography.Text>
+                        )}
+                      </Space>
+                    ) : (
                     <Space>
                       {row.event_id ? (
                         pendingCorrectionEventIds.has(row.event_id) ? (
@@ -492,7 +537,8 @@ export const MySessions = () => {
                         </Button>
                       </Popconfirm>
                     </Space>
-                  )}
+                    )
+                  }
                 />
               </Table>
             )}
