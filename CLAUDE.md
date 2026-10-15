@@ -227,7 +227,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0029`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0030`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -289,6 +289,43 @@ coaches aren't actually logging in yet — the app's real use so far is admin-si
   or Confirm hours on a calendar session. **Add 2027 periods before 1/10/2027.**
 - "Allow new users to sign up" is **off** in Supabase Auth (turned off 2026-10-12), so every login
   must be created deliberately: the script above, or Authentication → Users → Add user.
+
+### Sprocket fall import upgrade (2026-10-15, `0030_sprocket_ids.sql`)
+
+Driven by the fall export (10/19–12/6, 402 rows) and Sprocket's import template
+(`Calendar_Import_Template_Field.xlsx`, kept out of the repo). Findings:
+- **Games are `ClubEventType = 'Game'`** (24, all Dover-Sherborn Academy, arrival 30 min before) — R3's
+  warm-up rule is confirmed. Games have no Title; the parser names them "Team vs/@ Opponent".
+- **`ClubCalendarEventID` is the update key** — the template says it's "populated via the schedule
+  download" when updating events, so it's stable by design. Each event stores `sprocket_event_ids`
+  (array: Camp events collapse several rows), `sprocket_rows` (raw rows, for export back), and
+  `sprocket_snapshot` (what Sprocket said last time).
+- The **import layout = the export's columns**, so export-to-Sprocket can be "stored row with our
+  changes overlaid". Not built yet.
+- **Coaches are now in Notes** ("Max + Taron", "Taron/Matteus") or after an em dash in the Title
+  ("Goalie Clinic — Jack"); `parseCoachNames` reads both. DSA and AP rows name no coach at all.
+- 134 rows have **no location**; club-wide **Club** rows duplicate team rows (fall) but are real
+  sessions on their own (July's AP Mondays).
+
+Importer behavior now:
+- Re-import matches by Sprocket ID and calls `sprocket_sync_event` (admin-only): a field changes only
+  if Sprocket changed it since the last import **and** nobody changed it here; otherwise the app's
+  value is kept and listed as a conflict. Coaches Sprocket adds are added; coaches Sprocket drops are
+  removed only if their assignment is `source = 'sprocket'`. All logged as admin changes, reason
+  "Sprocket re-import". Events missing from a later export are left alone (can't tell deleted from
+  out-of-range). Events without IDs (July) still dedupe by the old field signature.
+- Every coach name must be decided (coach or Leave unassigned); first names auto-match when exactly
+  one active coach has that first name. **Team coaches**: rows naming no coach take a remembered
+  per-team default (DSA teams incl. games, AP groups) — Justin's answer to "who's paid for a game".
+- Blank locations map per town (team-name prefix before " - "); Club rows duplicating a team
+  practice/game at the same date/time/location and all Other rows are skipped and listed.
+- DSSC and Dover-Sherborn Academy → Town Sessions (Justin); program names match loosely (season
+  suffix, case, plural).
+- `Fall Calendar.csv` (gitignored) backs a parser test against the real file.
+
+**Fixed in passing:** `getIdentity` swallowed errors from its three role lookups, so a request that
+failed right after sign-in showed a real admin the "no access" screen (seen 2026-10-15). It now
+retries and throws instead of returning `none`.
 
 ## Phase 5 continued — scheduling & coach confirmation (✅ done, deployed 2026-09-26)
 

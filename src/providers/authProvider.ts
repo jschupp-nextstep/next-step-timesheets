@@ -91,11 +91,24 @@ export const authProvider: AuthProvider = {
     const email = (data.user.email ?? '').toLowerCase()
     // Roles come from the database's own checks (admins allowlist,
     // schedulers, coaches.email) so the UI can never disagree with RLS.
-    const [{ data: isAdmin }, { data: scheduler }, { data: coach }] = await Promise.all([
-      supabaseClient.rpc('is_admin'),
-      supabaseClient.from('schedulers').select('id, name').eq('email', email).eq('is_active', true).maybeSingle(),
-      supabaseClient.from('coaches').select('id, name, is_active').eq('email', email).maybeSingle(),
-    ])
+    // A failed lookup must never read as "no role": right after sign-in a
+    // request can go out before the session is attached and error, which
+    // used to land a real admin on the "no access" screen until a reload.
+    // Retry a few times, then throw (so it isn't cached as 'none').
+    const lookup = () =>
+      Promise.all([
+        supabaseClient.rpc('is_admin'),
+        supabaseClient.from('schedulers').select('id, name').eq('email', email).eq('is_active', true).maybeSingle(),
+        supabaseClient.from('coaches').select('id, name, is_active').eq('email', email).maybeSingle(),
+      ])
+    let results = await lookup()
+    for (let attempt = 1; attempt < 4 && results.some((r) => r.error); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt))
+      results = await lookup()
+    }
+    const failed = results.find((r) => r.error)
+    if (failed?.error) throw new Error(`Couldn't check your access: ${failed.error.message}`)
+    const [{ data: isAdmin }, { data: scheduler }, { data: coach }] = results
     if (isAdmin) return { role: 'admin', id: data.user.id, email }
     if (scheduler) {
       return {

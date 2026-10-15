@@ -10,6 +10,7 @@ import {
   resolveCampDayType,
   type LocationBlock,
   type ParsedEvent,
+  type SkippedRow,
 } from '../../utility/parseSprocketCsv'
 
 type IdName = { id: string; name: string }
@@ -27,7 +28,25 @@ type LocationRow = {
 // Day or Camp-Full Day based on the location's configured hours.
 const PROGRAM_NAME_MAP: Record<string, string> = {
   '2025-26 Annual Program': 'Annual Program',
+  // Justin, 2026-10-14: DSSC and Dover-Sherborn Academy are Town Sessions.
+  'DSSC 2026-2027': 'Town Sessions',
+  'Dover-Sherborn Academy 2026-2027': 'Town Sessions',
 }
+
+// Sprocket names carry a season ("Town Sessions 2026-2027"); ours don't.
+// Compared loosely (case, trailing season, singular/plural).
+const looseProgramName = (name: string) =>
+  name
+    .replace(/\s*\d{4}\s*-\s*\d{2,4}\s*$/, '')
+    .replace(/^\d{4}\s*-\s*\d{2,4}\s*/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/s$/, '')
+
+// "Leave unassigned" for a coach name or a team's default coach -- an
+// explicit decision, unlike an unanswered mapping (which blocks Confirm).
+const LEAVE = '__leave__'
+const LEAVE_OPTION = { label: 'Leave unassigned', value: LEAVE }
 
 // A blank Sprocket program name is a real, mappable value (some rows carry no
 // program at all) -- never drop it from the review table, just give it a
@@ -53,6 +72,9 @@ type StoredMappings = {
   programs: Record<string, string>
   locations: Record<string, string>
   coaches: Record<string, string>
+  // Team name -> default coach ids for rows that name no coach ([] = leave
+  // unassigned). Fall export: DSA teams and AP groups (incl. their games).
+  teamCoaches: Record<string, string[]>
 }
 
 function loadStoredMappings(): StoredMappings {
@@ -63,20 +85,38 @@ function loadStoredMappings(): StoredMappings {
       programs: parsed.programs ?? {},
       locations: parsed.locations ?? {},
       coaches: parsed.coaches ?? {},
+      teamCoaches: parsed.teamCoaches ?? {},
     }
   } catch {
-    return { programs: {}, locations: {}, coaches: {} }
+    return { programs: {}, locations: {}, coaches: {}, teamCoaches: {} }
   }
 }
 
-function saveStoredMapping(category: keyof StoredMappings, key: string, value: string | null) {
-  const stored = loadStoredMappings()
-  if (value) {
-    stored[category][key] = value
-  } else {
-    delete stored[category][key]
+function saveTeamCoaches(team: string, coachIds: string[] | null) {
+  try {
+    const stored = loadStoredMappings()
+    if (coachIds) stored.teamCoaches[team] = coachIds
+    else delete stored.teamCoaches[team]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+  } catch {
+    // remembering is a convenience only
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+}
+
+const teamKey = (event: ParsedEvent) => event.teamName || event.title
+
+function saveStoredMapping(category: 'programs' | 'locations' | 'coaches', key: string, value: string | null) {
+  try {
+    const stored = loadStoredMappings()
+    if (value) {
+      stored[category][key] = value
+    } else {
+      delete stored[category][key]
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+  } catch {
+    // remembering is a convenience only
+  }
 }
 
 // A Regular location always collapses to one block per name (see
@@ -98,6 +138,11 @@ type SkippedEvent = {
 }
 
 type ImportSummary = {
+  eventsUpdated: number
+  eventsUnchanged: number
+  changes: string[]
+  conflicts: string[]
+  failures: string[]
   eventsCreated: number
   eventsSkippedExisting: number
   eventsSkippedUnresolved: number
@@ -117,6 +162,11 @@ export const SprocketImport = () => {
   const [locationMap, setLocationMap] = useState<Record<string, string | null>>({})
   const [coachMap, setCoachMap] = useState<Record<string, string | null>>({})
   const [coachProgramOverride, setCoachProgramOverride] = useState<Record<string, string | null>>({})
+  const [teamCoachMap, setTeamCoachMap] = useState<Record<string, string[] | undefined>>({})
+  const [skippedRows, setSkippedRows] = useState<SkippedRow[]>([])
+  // Sprocket row id -> our event id, for events imported before.
+  const [existingBySprocketId, setExistingBySprocketId] = useState<Map<string, string>>(new Map())
+  const [matchError, setMatchError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [summary, setSummary] = useState<ImportSummary | null>(null)
 
@@ -152,12 +202,22 @@ export const SprocketImport = () => {
     () => Array.from(new Set(parsed?.flatMap((e) => e.assignedCoachNames) ?? [])),
     [parsed],
   )
+  const teamsNeedingCoach = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const e of parsed ?? []) if (e.needsTeamCoach) counts.set(teamKey(e), (counts.get(teamKey(e)) ?? 0) + 1)
+    return Array.from(counts, ([team, count]) => ({ team, count })).sort((a, b) => a.team.localeCompare(b.team))
+  }, [parsed])
+  const matchedCount = useMemo(
+    () => (parsed ?? []).filter((e) => e.sprocketIds.some((id) => existingBySprocketId.has(id))).length,
+    [parsed, existingBySprocketId],
+  )
 
   const handleFile = async (file: File) => {
     const text = await file.text()
-    const { events, errors } = parseSprocketCsv(text)
+    const { events, errors, skipped } = parseSprocketCsv(text)
     setParsed(events)
     setParseErrors(errors)
+    setSkippedRows(skipped)
     setSummary(null)
 
     // Auto-resolve anything that matches a mapping remembered from a
@@ -174,7 +234,9 @@ export const SprocketImport = () => {
         continue
       }
       const mappedName = PROGRAM_NAME_MAP[name] ?? name
-      const match = programs.find((p) => p.name === mappedName)
+      const match =
+        programs.find((p) => p.name === mappedName) ??
+        programs.find((p) => looseProgramName(p.name) === looseProgramName(mappedName))
       nextProgramMap[name] = match?.id ?? null
     }
     setProgramMap(nextProgramMap)
@@ -204,15 +266,43 @@ export const SprocketImport = () => {
     const nextCoachMap: Record<string, string | null> = {}
     for (const name of new Set(events.flatMap((e) => e.assignedCoachNames))) {
       const cached = stored.coaches[name]
-      if (cached && coaches.some((c) => c.id === cached)) {
+      if (cached && (cached === LEAVE || coaches.some((c) => c.id === cached))) {
         nextCoachMap[name] = cached
         continue
       }
-      const match = coaches.find((c) => c.name === name)
-      nextCoachMap[name] = match?.id ?? null
+      // Full name, else a first name only one active coach has ("Keith").
+      const lower = name.toLowerCase()
+      const exact = coaches.find((c) => c.name.trim().toLowerCase() === lower)
+      const byFirst = coaches.filter((c) => c.name.trim().toLowerCase().split(/\s+/)[0] === lower)
+      nextCoachMap[name] = exact?.id ?? (byFirst.length === 1 ? byFirst[0].id : null)
     }
     setCoachMap(nextCoachMap)
     setCoachProgramOverride({})
+
+    const nextTeamMap: Record<string, string[] | undefined> = {}
+    for (const e of events) {
+      if (!e.needsTeamCoach) continue
+      const cached = stored.teamCoaches[teamKey(e)]
+      if (cached && cached.every((id) => coaches.some((c) => c.id === id))) nextTeamMap[teamKey(e)] = cached
+    }
+    setTeamCoachMap(nextTeamMap)
+
+    // Events imported before, matched by Sprocket's own id.
+    setMatchError(null)
+    const ids = events.flatMap((e) => e.sprocketIds)
+    const found = new Map<string, string>()
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data, error } = await supabaseClient
+        .from('events')
+        .select('id, sprocket_event_ids')
+        .overlaps('sprocket_event_ids', ids.slice(i, i + 150))
+      if (error) {
+        setMatchError(error.message)
+        break
+      }
+      for (const row of data ?? []) for (const id of row.sprocket_event_ids ?? []) found.set(id, row.id)
+    }
+    setExistingBySprocketId(found)
 
     return false // prevent antd Upload from actually uploading anywhere
   }
@@ -222,8 +312,17 @@ export const SprocketImport = () => {
   const allProgramsResolved = distinctProgramNames.every((n) => programMap[n])
   const allLocationsResolved = locationBlocks.every((b) => locationMap[b.key])
   const campProgramsAvailable = !hasCampEvents || (!!campHalfDayProgram && !!campFullDayProgram)
+  const allCoachesDecided = distinctCoachNames.every((n) => coachMap[n])
+  const allTeamsDecided = teamsNeedingCoach.every((t) => teamCoachMap[t.team] !== undefined)
   const readyToImport =
-    !!parsed && parsed.length > 0 && allProgramsResolved && allLocationsResolved && campProgramsAvailable
+    !!parsed &&
+    parsed.length > 0 &&
+    allProgramsResolved &&
+    allLocationsResolved &&
+    campProgramsAvailable &&
+    allCoachesDecided &&
+    allTeamsDecided &&
+    !matchError
 
   const runImport = async () => {
     if (!parsed) return
@@ -250,6 +349,11 @@ export const SprocketImport = () => {
       const existingSignatures = new Set((existingEvents ?? []).map(existingKey))
       const locationsById = new Map(locations.map((l) => [l.id, l]))
 
+      let eventsUpdated = 0
+      let eventsUnchanged = 0
+      const changes: string[] = []
+      const conflicts: string[] = []
+      const failures: string[] = []
       let eventsCreated = 0
       let eventsSkippedExisting = 0
       let eventsSkippedUnresolved = 0
@@ -316,6 +420,40 @@ export const SprocketImport = () => {
           continue
         }
 
+        const namedCoachIds = event.assignedCoachNames
+          .map((name) => coachMap[name])
+          .filter((id): id is string => !!id && id !== LEAVE)
+        const coachIds = Array.from(
+          new Set(event.needsTeamCoach ? (teamCoachMap[teamKey(event)] ?? []) : namedCoachIds),
+        ).sort()
+        const snapshot = {
+          event_date: event.eventDate,
+          start_time: event.startTime,
+          end_time: event.endTime,
+          is_cancelled: event.isCancelled,
+          coach_ids: coachIds,
+        }
+
+        const existingId = event.sprocketIds.map((id) => existingBySprocketId.get(id)).find(Boolean)
+        if (existingId) {
+          const { data: result, error: syncError } = await supabaseClient.rpc('sprocket_sync_event', {
+            p_event_id: existingId,
+            p_snapshot: snapshot,
+            p_rows: event.rows,
+            p_ids: event.sprocketIds,
+          })
+          if (syncError) {
+            failures.push(`${event.eventDate} ${event.sessionName}: ${syncError.message}`)
+            continue
+          }
+          const r = result as { changes: string[]; conflicts: string[] }
+          changes.push(...r.changes)
+          conflicts.push(...r.conflicts)
+          if (r.changes.length > 0) eventsUpdated += 1
+          else eventsUnchanged += 1
+          continue
+        }
+
         const signature = existingKey({
           program_id: programId,
           location_id: locationId,
@@ -340,27 +478,34 @@ export const SprocketImport = () => {
             session_name: event.sessionName,
             is_cancelled: event.isCancelled,
             paid_early_minutes: event.paidEarlyMinutes,
+            sprocket_event_ids: event.sprocketIds,
+            sprocket_rows: event.rows,
+            sprocket_snapshot: snapshot,
           })
           .select('id')
           .single()
 
-        if (error || !inserted) continue
+        if (error || !inserted) {
+          failures.push(`${event.eventDate} ${event.sessionName}: ${error?.message ?? 'not created'}`)
+          continue
+        }
         eventsCreated += 1
         existingSignatures.add(signature)
 
-        if (event.assignedCoachNames.length > 0) {
-          const assignmentRows = event.assignedCoachNames
-            .map((name) => ({ name, coachId: coachMap[name] }))
-            .filter((entry): entry is { name: string; coachId: string } => !!entry.coachId)
-            .map(({ name, coachId }) => ({
+        if (coachIds.length > 0) {
+          const nameFor = (id: string) => event.assignedCoachNames.find((n) => coachMap[n] === id)
+          const assignmentRows = coachIds.map((coachId) => {
+            const name = nameFor(coachId)
+            return {
               event_id: inserted.id,
               coach_id: coachId,
-              program_id: coachProgramOverride[name] ?? null,
+              program_id: (name && coachProgramOverride[name]) || null,
               // Re-import policy: Sprocket may replace only its own rows.
               source: 'sprocket',
-            }))
+            }
+          })
 
-          assignmentsSkippedUnmatched += event.assignedCoachNames.length - assignmentRows.length
+          assignmentsSkippedUnmatched += event.needsTeamCoach ? 0 : event.assignedCoachNames.length - namedCoachIds.length
 
           if (assignmentRows.length > 0) {
             const { error: assignError } = await supabaseClient
@@ -372,6 +517,11 @@ export const SprocketImport = () => {
       }
 
       setSummary({
+        eventsUpdated,
+        eventsUnchanged,
+        changes,
+        conflicts,
+        failures,
         eventsCreated,
         eventsSkippedExisting,
         eventsSkippedUnresolved,
@@ -393,7 +543,9 @@ export const SprocketImport = () => {
       <Typography.Paragraph type="secondary">
         Upload a Sprocket calendar export (CSV). Camp sessions with multiple staff rows are
         collapsed into one event with their staff assignments recorded; everything else becomes
-        one event per row.
+        one event per row, with coaches read from Notes or a "Title — Coach" suffix. Re-uploading
+        a later export updates the sessions it already created (matched by Sprocket's event ID)
+        instead of duplicating them.
       </Typography.Paragraph>
 
       <Upload.Dragger beforeUpload={handleFile} accept=".csv" showUploadList={false} maxCount={1}>
@@ -418,7 +570,30 @@ export const SprocketImport = () => {
             style={{ marginTop: 16 }}
             type="info"
             message={`${parsed.length} events found, referencing ${distinctProgramNames.length + (hasCampEvents ? 1 : 0)} program name(s), ${locationBlocks.length} location/date block(s), and ${distinctCoachNames.length} coach name(s).`}
+            description={
+              matchedCount > 0
+                ? `${matchedCount} of them were imported before (matched by Sprocket's event ID) and will only change where Sprocket changed something since; ${parsed.length - matchedCount} are new.`
+                : `None of these were imported before -- all ${parsed.length} are new.`
+            }
           />
+          {matchError && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="error"
+              message="Couldn't check for sessions imported before"
+              description={`${matchError} -- has migration 0030 been run?`}
+            />
+          )}
+          {skippedRows.length > 0 && (
+            <Card title={`Not imported (${skippedRows.length})`} style={{ marginTop: 16 }} size="small">
+              <Table dataSource={skippedRows} rowKey={(r, i) => `${r.eventDate}-${r.title}-${i}`} pagination={{ pageSize: 10 }} size="small">
+                <Table.Column dataIndex="eventDate" title="Date" />
+                <Table.Column dataIndex="title" title="Sprocket title" />
+                <Table.Column dataIndex="type" title="Type" />
+                <Table.Column dataIndex="reason" title="Why" />
+              </Table>
+            </Card>
+          )}
 
           {hasCampEvents && !campProgramsAvailable && (
             <Alert
@@ -516,10 +691,13 @@ export const SprocketImport = () => {
                 render={(_, record: { name: string }) => (
                   <Select
                     style={{ width: 240 }}
-                    placeholder="Unmatched -- assignment will be skipped"
+                    placeholder="Pick a coach or Leave unassigned"
                     allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    status={coachMap[record.name] ? undefined : 'error'}
                     value={coachMap[record.name] ?? undefined}
-                    options={coaches.map((c) => ({ label: c.name, value: c.id }))}
+                    options={[...coaches.map((c) => ({ label: c.name, value: c.id })), LEAVE_OPTION]}
                     onChange={(value) => {
                       setCoachMap((prev) => ({ ...prev, [record.name]: value ?? null }))
                       saveStoredMapping('coaches', record.name, value ?? null)
@@ -544,13 +722,52 @@ export const SprocketImport = () => {
               />
             </Table>
             <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
-              An unmatched coach name isn't required to proceed -- that event still gets created,
-              just without that particular assignment recorded. The program override applies to
+              Names come from Camp staff rows, Notes ("Max + Taron"), and title suffixes ("Goalie Clinic —
+              Jack"). A first name matches automatically when only one active coach has it; decide the rest
+              (a coach, or Leave unassigned) before importing. The program override applies to
               every assignment for that coach in this import (e.g. mark someone as Nurse rather
               than the session's default Camp/Counselor program) -- leave blank for a plain
               assignment with no specific program noted.
             </Typography.Paragraph>
           </Card>
+
+          {teamsNeedingCoach.length > 0 && (
+            <Card title="Team coaches (sessions with no coach named)" style={{ marginTop: 16 }} size="small">
+              <Typography.Paragraph type="secondary">
+                These sessions (including games) name no coach in Sprocket. Pick who coaches each team --
+                they're assigned to every such session for that team, and remembered for next time. A sub
+                for one game is done afterwards with Sub on the session's page.
+              </Typography.Paragraph>
+              <Table dataSource={teamsNeedingCoach} rowKey="team" pagination={false} size="small">
+                <Table.Column dataIndex="team" title="Sprocket team" />
+                <Table.Column dataIndex="count" title="Sessions" />
+                <Table.Column
+                  title="Coach(es)"
+                  render={(_, record: { team: string }) => {
+                    const value = teamCoachMap[record.team]
+                    return (
+                      <Select
+                        mode="multiple"
+                        style={{ width: 320 }}
+                        placeholder="Pick coach(es) or Leave unassigned"
+                        showSearch
+                        optionFilterProp="label"
+                        status={value === undefined ? 'error' : undefined}
+                        value={value === undefined ? [] : value.length === 0 ? [LEAVE] : value}
+                        options={[...coaches.map((c) => ({ label: c.name, value: c.id })), LEAVE_OPTION]}
+                        onChange={(values: string[]) => {
+                          const last = values[values.length - 1]
+                          const next = values.length === 0 ? undefined : last === LEAVE ? [] : values.filter((v) => v !== LEAVE)
+                          setTeamCoachMap((prev) => ({ ...prev, [record.team]: next }))
+                          saveTeamCoaches(record.team, next ?? null)
+                        }}
+                      />
+                    )
+                  }}
+                />
+              </Table>
+            </Card>
+          )}
 
           <Space style={{ marginTop: 16 }}>
             <Button type="primary" disabled={!readyToImport} loading={importing} onClick={runImport}>
@@ -558,7 +775,7 @@ export const SprocketImport = () => {
             </Button>
             {!readyToImport && (
               <Typography.Text type="warning">
-                Resolve all programs and locations above before importing.
+                Resolve every program, location, coach name, and team coach above before importing.
               </Typography.Text>
             )}
           </Space>
@@ -574,6 +791,8 @@ export const SprocketImport = () => {
             description={
               <ul style={{ marginBottom: 0 }}>
                 <li>{summary.eventsCreated} events created</li>
+                <li>{summary.eventsUpdated} previously imported events updated from Sprocket</li>
+                <li>{summary.eventsUnchanged} previously imported events unchanged</li>
                 <li>{summary.eventsSkippedExisting} events already existed, skipped</li>
                 <li>{summary.eventsSkippedUnresolved} events skipped (unresolved program/location)</li>
                 <li>{summary.eventsSkippedIgnored} events intentionally not imported (marked "don't import")</li>
@@ -582,6 +801,28 @@ export const SprocketImport = () => {
               </ul>
             }
           />
+
+          {summary.failures.length > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="error"
+              message={`${summary.failures.length} event(s) failed`}
+              description={<ul style={{ marginBottom: 0 }}>{summary.failures.map((f, i) => <li key={i}>{f}</li>)}</ul>}
+            />
+          )}
+          {summary.conflicts.length > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="warning"
+              message="Changed both in Sprocket and here -- kept this app's version"
+              description={<ul style={{ marginBottom: 0 }}>{summary.conflicts.map((c, i) => <li key={i}>{c}</li>)}</ul>}
+            />
+          )}
+          {summary.changes.length > 0 && (
+            <Card title="Updated from Sprocket (logged in each session's history)" style={{ marginTop: 16 }} size="small">
+              <ul style={{ marginBottom: 0 }}>{summary.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+            </Card>
+          )}
 
           {summary.skippedEvents.length > 0 && (
             <Card title="Skipped events" style={{ marginTop: 16 }} size="small">

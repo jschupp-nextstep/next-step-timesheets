@@ -15,6 +15,10 @@ export type SprocketRow = {
   IsCancelled: string
   ArrivalTime?: string
   ClubEventType?: string
+  Notes?: string
+  Opponent?: string
+  AwayGame?: string
+  ClubCalendarEventID?: string
 }
 
 export type ParsedEvent = {
@@ -33,11 +37,24 @@ export type ParsedEvent = {
   // 10-15 before AP practices), so it's only a warm-up signal on Game rows.
   // AP's early start comes from the program rule instead.
   paidEarlyMinutes: number | null
+  // Sprocket's own row IDs (ClubCalendarEventID) -- the re-import match key.
+  // Several for a Camp event (one row per staff member).
+  sprocketIds: string[]
+  // The raw rows, kept on the event for exporting changes back to Sprocket.
+  rows: Record<string, string>[]
+  teamName: string
+  // No coach named anywhere on the row (Notes or title) -- the importer's
+  // per-team default coach applies. Never set for Camp rows.
+  needsTeamCoach: boolean
 }
+
+// Rows not turned into events, listed on the import screen.
+export type SkippedRow = { title: string; eventDate: string; type: string; reason: string }
 
 export type ParseResult = {
   events: ParsedEvent[]
   errors: string[]
+  skipped: SkippedRow[]
 }
 
 export type LocationBlock = {
@@ -74,6 +91,13 @@ function formatDateLabel(isoDate: string): string {
 function normalizeLocationName(locationName: string): string {
   return locationName || '(no location on Sprocket)'
 }
+
+// Blank-location rows get a placeholder per town -- the part of the team name
+// before " - " ("Quincy - B6.2" -> Quincy), else the whole team name -- so
+// each town maps to its own location instead of every blank row sharing one
+// "(no location)" bucket, without one row per team (13 Quincy teams).
+export const blankLocationLabel = (teamOrTitle: string) =>
+  `(no location on Sprocket) · ${teamOrTitle.split(' - ')[0].trim() || teamOrTitle}`
 
 export function groupEventsByLocationBlock(events: ParsedEvent[]): LocationBlockResolution {
   // Camp dates and non-Camp dates are tracked separately per location, since
@@ -190,6 +214,32 @@ function extractCoachName(teamName: string): string {
   return teamName.replace(/\s*-\s*Camps?\s*$/i, '').trim()
 }
 
+// Coach names written in Notes ("Max + Taron", "Matteus & Joselito",
+// "Taron/Matteus", "Joselito (combined session with G4.2)") or after an em/en
+// dash in the title ("Goalie Clinic — Jack"). Anything that doesn't look like
+// a name (digits, long sentences like "Please arrive 30 minutes before game
+// time.") is dropped; the import screen still makes the admin confirm every
+// name it kept.
+export function parseCoachNames(text: string | undefined): string[] {
+  if (!text) return []
+  const cleaned = text.replace(/\([^)]*\)/g, ' ')
+  const names: string[] = []
+  for (const part of cleaned.split(/\s*(?:\+|&|\/|,|;|\band\b)\s*/i)) {
+    const name = part.replace(/\s+/g, ' ').trim().replace(/[.:]$/, '')
+    if (!name || !/^[A-Za-z][A-Za-z.'\- ]*$/.test(name) || name.split(' ').length > 3) continue
+    if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) names.push(name)
+  }
+  return names
+}
+
+// "Final Third Clinic — Keith" -> base "Final Third Clinic", names ["Keith"].
+// Only an em/en dash: "DSA BU09 - DSA Practice" is a hyphen and not a coach.
+function splitTitleCoaches(title: string): { base: string; names: string[] } {
+  const match = title.match(/^(.*?)\s+[—–]\s+(.+)$/)
+  if (!match) return { base: title, names: [] }
+  return { base: match[1].trim(), names: parseCoachNames(match[2]) }
+}
+
 function parseTime12h(value: string): string | null {
   const trimmed = value?.trim()
   if (!trimmed) return null
@@ -223,10 +273,39 @@ export function parseSprocketCsv(csvText: string): ParseResult {
 
   const groups = new Map<string, ParsedEvent>()
 
-  for (const row of result.data) {
-    if (!row.Title || !row.StartDate) continue
+  const skipped: SkippedRow[] = []
+  const eventType = (row: SprocketRow) => row.ClubEventType?.trim().toLowerCase() ?? ''
+  // A club-wide "Club" row at the same date, time and location as a team's
+  // practice/game is a duplicate listing (fall export: Rehoboth "Annual
+  // Program"/"Jr Academy" next to each AP group's own row). A Club row with no
+  // team row beside it is a real session (July's "AP Mondays") and is kept.
+  const teamSlots = new Set(
+    result.data
+      .filter((r) => ['practice', 'game'].includes(eventType(r)))
+      .map((r) => [r.StartDate, r.StartDateTime, r.LocationName].join('|')),
+  )
 
-    const { base, isStaffed } = stripRoleSuffix(row.Title.trim())
+  for (const row of result.data) {
+    const type = eventType(row)
+    const teamNameRaw = row.TeamName?.trim() ?? ''
+    // Games have no Title; Sprocket's own default is "Team vs./@ Opponent".
+    const rawTitle =
+      row.Title?.trim() ||
+      (type === 'game' && teamNameRaw
+        ? `${teamNameRaw} ${row.AwayGame?.trim().toLowerCase() === 'yes' ? '@' : 'vs'} ${row.Opponent?.trim() || 'TBD'}`
+        : '')
+    if (!rawTitle || !row.StartDate) continue
+    if (type === 'other') {
+      skipped.push({ title: rawTitle, eventDate: row.StartDate, type: 'Other', reason: 'Not a session (team event)' })
+      continue
+    }
+    if (type === 'club' && teamSlots.has([row.StartDate, row.StartDateTime, row.LocationName].join('|'))) {
+      skipped.push({ title: rawTitle, eventDate: row.StartDate, type: 'Club', reason: "Duplicate of a team's session at the same time and place" })
+      continue
+    }
+
+    const titled = splitTitleCoaches(rawTitle)
+    const { base, isStaffed } = stripRoleSuffix(titled.base)
     const eventDate = parseDate(row.StartDate)
     if (!eventDate) {
       errors.push(`Could not parse date "${row.StartDate}" for "${row.Title}"`)
@@ -234,9 +313,10 @@ export function parseSprocketCsv(csvText: string): ParseResult {
     }
     const startTime = parseTime12h(row.StartDateTime)
     const endTime = parseTime12h(row.EndDateTime)
-    const locationName = row.LocationName?.trim() ?? ''
+    const teamName = teamNameRaw
+    const locationName = row.LocationName?.trim() || (isStaffed ? '' : blankLocationLabel(teamName || base))
     const programName = row.ProgramName?.trim() ?? ''
-    const teamName = row.TeamName?.trim() ?? ''
+    const coachNames = isStaffed ? [] : [...titled.names, ...parseCoachNames(row.Notes)]
 
     // Staffed (Camp) rows collapse across staff members -- team name varies
     // per coach/role but represents the same event, so it's excluded from
@@ -256,12 +336,22 @@ export function parseSprocketCsv(csvText: string): ParseResult {
         eventDate,
         startTime,
         endTime,
-        sessionName: isStaffed ? base : teamName || base,
+        sessionName: isStaffed ? base : type === 'game' ? base : teamName || base,
         isCancelled: row.IsCancelled?.trim().toLowerCase() === 'yes',
         assignedCoachNames: [],
         paidEarlyMinutes: gameWarmupMinutes(row),
+        sprocketIds: [],
+        rows: [],
+        teamName,
+        needsTeamCoach: false,
       }
       groups.set(groupKey, event)
+    }
+    const sprocketId = row.ClubCalendarEventID?.trim()
+    if (sprocketId && !event.sprocketIds.includes(sprocketId)) event.sprocketIds.push(sprocketId)
+    event.rows.push({ ...(row as unknown as Record<string, string>) })
+    for (const name of coachNames) {
+      if (!event.assignedCoachNames.some((n) => n.toLowerCase() === name.toLowerCase())) event.assignedCoachNames.push(name)
     }
 
     if (isStaffed && teamName) {
@@ -272,5 +362,9 @@ export function parseSprocketCsv(csvText: string): ParseResult {
     }
   }
 
-  return { events: Array.from(groups.values()), errors }
+  const events = Array.from(groups.values())
+  for (const event of events) {
+    event.needsTeamCoach = event.programName !== 'Camps' && event.assignedCoachNames.length === 0
+  }
+  return { events, errors, skipped }
 }
