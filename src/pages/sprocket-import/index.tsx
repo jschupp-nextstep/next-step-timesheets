@@ -819,8 +819,11 @@ export const SprocketImport = () => {
                   )}
                   {parts.length > 0 && (
                     <Typography.Text type="warning">
-                      Left for later: {parts.join(', ')}. Sessions at those locations/programs are skipped this
-                      time; coaches left for later import unassigned.
+                      Left for later: {parts.join(', ')}.
+                      {laterCounts.locations || laterCounts.programs
+                        ? ' Sessions at those locations/programs are skipped this time.'
+                        : ''}
+                      {laterCounts.coaches || laterCounts.teams ? ' Their sessions import with no coach assigned.' : ''}
                     </Typography.Text>
                   )}
                 </Space>
