@@ -62,6 +62,17 @@ const programNameLabel = (name: string) => name || '(blank on Sprocket)'
 const IGNORE = '__ignore__'
 const IGNORE_OPTION = { label: "Don't import (valid event, not paid)", value: IGNORE }
 
+// "Decide later": unlike Don't import / Leave unassigned, never remembered,
+// so the next upload asks again. Sessions with a location/program left for
+// later aren't created (listed as skipped) and come in as new on a later
+// upload; a coach/team left for later imports unassigned and is filled in on
+// re-upload once decided (sprocket_sync_event adds the coach).
+const LATER = '__later__'
+const LATER_OPTION = { label: 'Decide later (skip these sessions for now)', value: LATER }
+const LATER_COACH_OPTION = { label: 'Decide later (import unassigned for now)', value: LATER }
+const realIds = (ids: (string | null | undefined)[]) =>
+  ids.filter((id): id is string => !!id && id !== LEAVE && id !== LATER)
+
 // Every mapping decision (program, location, coach) is remembered in
 // localStorage and reapplied on the next upload -- without this, every
 // re-run of a periodic import would force re-mapping everything from
@@ -385,6 +396,10 @@ export const SprocketImport = () => {
           recordIgnored(event, 'Location marked "don\'t import"')
           continue
         }
+        if (locationId === LATER) {
+          recordSkip(event, 'Location left for later -- map it and upload again')
+          continue
+        }
         if (!locationId) {
           recordSkip(event, 'No location mapping selected for this location/date block')
           continue
@@ -410,6 +425,10 @@ export const SprocketImport = () => {
           recordIgnored(event, 'Program marked "don\'t import"')
           continue
         }
+        if (programId === LATER) {
+          recordSkip(event, 'Program left for later -- map it and upload again')
+          continue
+        }
         if (!programId) {
           recordSkip(
             event,
@@ -420,11 +439,9 @@ export const SprocketImport = () => {
           continue
         }
 
-        const namedCoachIds = event.assignedCoachNames
-          .map((name) => coachMap[name])
-          .filter((id): id is string => !!id && id !== LEAVE)
+        const namedCoachIds = realIds(event.assignedCoachNames.map((name) => coachMap[name]))
         const coachIds = Array.from(
-          new Set(event.needsTeamCoach ? (teamCoachMap[teamKey(event)] ?? []) : namedCoachIds),
+          new Set(event.needsTeamCoach ? realIds(teamCoachMap[teamKey(event)] ?? []) : namedCoachIds),
         ).sort()
         const snapshot = {
           event_date: event.eventDate,
@@ -628,10 +645,10 @@ export const SprocketImport = () => {
                     style={{ width: 260 }}
                     placeholder="Select a program"
                     value={programMap[record.name] ?? undefined}
-                    options={[...programs.map((p) => ({ label: p.name, value: p.id })), IGNORE_OPTION]}
+                    options={[...programs.map((p) => ({ label: p.name, value: p.id })), IGNORE_OPTION, LATER_OPTION]}
                     onChange={(value) => {
                       setProgramMap((prev) => ({ ...prev, [record.name]: value }))
-                      saveStoredMapping('programs', record.name, value ?? null)
+                      saveStoredMapping('programs', record.name, value === LATER ? null : (value ?? null))
                     }}
                     status={programMap[record.name] ? undefined : 'error'}
                   />
@@ -656,10 +673,10 @@ export const SprocketImport = () => {
                         block.isCampProgram ? 'Select a Camp/Nurse location' : 'Select a Regular location'
                       }
                       value={locationMap[block.key] ?? undefined}
-                      options={[...candidates.map((l) => ({ label: l.name, value: l.id })), IGNORE_OPTION]}
+                      options={[...candidates.map((l) => ({ label: l.name, value: l.id })), IGNORE_OPTION, LATER_OPTION]}
                       onChange={(value) => {
                         setLocationMap((prev) => ({ ...prev, [block.key]: value }))
-                        saveStoredMapping('locations', locationCacheKey(block), value ?? null)
+                        saveStoredMapping('locations', locationCacheKey(block), value === LATER ? null : (value ?? null))
                       }}
                       status={locationMap[block.key] ? undefined : 'error'}
                     />
@@ -697,10 +714,10 @@ export const SprocketImport = () => {
                     optionFilterProp="label"
                     status={coachMap[record.name] ? undefined : 'error'}
                     value={coachMap[record.name] ?? undefined}
-                    options={[...coaches.map((c) => ({ label: c.name, value: c.id })), LEAVE_OPTION]}
+                    options={[...coaches.map((c) => ({ label: c.name, value: c.id })), LEAVE_OPTION, LATER_COACH_OPTION]}
                     onChange={(value) => {
                       setCoachMap((prev) => ({ ...prev, [record.name]: value ?? null }))
-                      saveStoredMapping('coaches', record.name, value ?? null)
+                      saveStoredMapping('coaches', record.name, value === LATER ? null : (value ?? null))
                     }}
                   />
                 )}
@@ -754,12 +771,19 @@ export const SprocketImport = () => {
                         optionFilterProp="label"
                         status={value === undefined ? 'error' : undefined}
                         value={value === undefined ? [] : value.length === 0 ? [LEAVE] : value}
-                        options={[...coaches.map((c) => ({ label: c.name, value: c.id })), LEAVE_OPTION]}
+                        options={[...coaches.map((c) => ({ label: c.name, value: c.id })), LEAVE_OPTION, LATER_COACH_OPTION]}
                         onChange={(values: string[]) => {
                           const last = values[values.length - 1]
-                          const next = values.length === 0 ? undefined : last === LEAVE ? [] : values.filter((v) => v !== LEAVE)
+                          const next =
+                            values.length === 0
+                              ? undefined
+                              : last === LEAVE
+                                ? []
+                                : last === LATER
+                                  ? [LATER]
+                                  : values.filter((v) => v !== LEAVE && v !== LATER)
                           setTeamCoachMap((prev) => ({ ...prev, [record.team]: next }))
-                          saveTeamCoaches(record.team, next ?? null)
+                          saveTeamCoaches(record.team, next && !next.includes(LATER) ? next : null)
                         }}
                       />
                     )

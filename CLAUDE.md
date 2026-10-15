@@ -319,6 +319,10 @@ Importer behavior now:
   per-team default (DSA teams incl. games, AP groups) — Justin's answer to "who's paid for a game".
 - Blank locations map per town (team-name prefix before " - "); Club rows duplicating a team
   practice/game at the same date/time/location and all Other rows are skipped and listed.
+- **Decide later** on every mapping (program, location, coach name, team coach) — never remembered,
+  unlike Don't import / Leave unassigned. A location/program left for later skips those sessions
+  (listed; they come in as new on a later upload); a coach/team left for later imports unassigned,
+  and mapping it on a re-upload adds the coach via `sprocket_sync_event`.
 - DSSC and Dover-Sherborn Academy → Town Sessions (Justin); program names match loosely (season
   suffix, case, plural).
 - `Fall Calendar.csv` (gitignored) backs a parser test against the real file.
