@@ -201,6 +201,9 @@ export const SprocketImport = () => {
   const locations = locationsResult?.data ?? []
   const coaches = coachesResult?.data ?? []
 
+  // 0031: sessions whose location isn't mapped import here instead of being
+  // skipped; a re-upload moves them once a real location is picked.
+  const locationTbd = locations.find((l) => l.name === 'Location TBD')
   const campHalfDayProgram = programs.find((p) => p.name === 'Camp-Half Day')
   const campFullDayProgram = programs.find((p) => p.name === 'Camp-Full Day')
 
@@ -270,7 +273,7 @@ export const SprocketImport = () => {
       const match =
         candidates.find((l) => l.name.startsWith(block.locationName) && l.name !== block.locationName) ??
         candidates.find((l) => l.name === block.locationName)
-      nextLocationMap[block.key] = match?.id ?? LATER
+      nextLocationMap[block.key] = match?.id ?? (!block.isCampProgram && locationTbd ? locationTbd.id : LATER)
     }
     setLocationMap(nextLocationMap)
 
@@ -327,6 +330,7 @@ export const SprocketImport = () => {
   const laterCounts = {
     programs: distinctProgramNames.filter((n) => isLater(programMap[n])).length,
     locations: locationBlocks.filter((b) => isLater(locationMap[b.key])).length,
+    tbd: locationBlocks.filter((b) => !!locationTbd && locationMap[b.key] === locationTbd.id).length,
     coaches: distinctCoachNames.filter((n) => isLater(coachMap[n])).length,
     teams: teamsNeedingCoach.filter((t) => !teamCoachMap[t.team] || teamCoachMap[t.team]?.includes(LATER)).length,
   }
@@ -447,6 +451,9 @@ export const SprocketImport = () => {
           end_time: event.endTime,
           is_cancelled: event.isCancelled,
           coach_ids: coachIds,
+          location_id: locationId,
+          program_id: programId,
+          session_name: event.sessionName,
         }
 
         const existingId = event.sprocketIds.map((id) => existingBySprocketId.get(id)).find(Boolean)
@@ -676,7 +683,7 @@ export const SprocketImport = () => {
                         setLocationMap((prev) => ({ ...prev, [block.key]: value }))
                         saveStoredMapping('locations', locationCacheKey(block), value === LATER ? null : (value ?? null))
                       }}
-                      status={isLater(locationMap[block.key]) ? 'warning' : undefined}
+                      status={isLater(locationMap[block.key]) || locationMap[block.key] === locationTbd?.id ? 'warning' : undefined}
                     />
                   )
                 }}
@@ -802,12 +809,22 @@ export const SprocketImport = () => {
                 laterCounts.coaches && `${laterCounts.coaches} coach name(s)`,
                 laterCounts.teams && `${laterCounts.teams} team coach(es)`,
               ].filter(Boolean)
-              return parts.length > 0 ? (
-                <Typography.Text type="warning">
-                  Left for later: {parts.join(', ')}. Sessions at those locations/programs are skipped this
-                  time; coaches left for later import unassigned.
-                </Typography.Text>
-              ) : null
+              return (
+                <Space direction="vertical" size={0}>
+                  {laterCounts.tbd > 0 && (
+                    <Typography.Text type="warning">
+                      {laterCounts.tbd} location(s) will import at Location TBD -- pick the real one on a later
+                      upload and those sessions move.
+                    </Typography.Text>
+                  )}
+                  {parts.length > 0 && (
+                    <Typography.Text type="warning">
+                      Left for later: {parts.join(', ')}. Sessions at those locations/programs are skipped this
+                      time; coaches left for later import unassigned.
+                    </Typography.Text>
+                  )}
+                </Space>
+              )
             })()}
           </Space>
         </>

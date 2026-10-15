@@ -227,7 +227,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0030`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0031`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -327,6 +327,15 @@ Importer behavior now:
 - DSSC and Dover-Sherborn Academy → Town Sessions (Justin); program names match loosely (season
   suffix, case, plural).
 - `Fall Calendar.csv` (gitignored) backs a parser test against the real file.
+
+**Location TBD + details on re-import (`0031_location_tbd.sql`, Justin 2026-10-15):** an unmapped
+(non-Camp) location imports at a real `Location TBD` location instead of being skipped (Justin:
+program must be mapped, location may be blank); picking the real location on a later upload moves
+those sessions. `sprocket_sync_event` now also carries `location_id` / `program_id` /
+`session_name` in the snapshot under the same "Sprocket changed it and nobody here did" rule, logged
+as a new `details` change type (reason lists old → new; `schedule_reverse` doesn't undo `details`
+rows — fix by hand on Edit Event). Location/program edits on the Edit Event screen are still not
+logged.
 
 **Fixed in passing:** `getIdentity` swallowed errors from its three role lookups, so a request that
 failed right after sign-in showed a real admin the "no access" screen (seen 2026-10-15). It now

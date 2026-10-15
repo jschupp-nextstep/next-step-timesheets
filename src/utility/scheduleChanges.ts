@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 export type ScheduleChangeRow = {
   id: string
   batch_id: string
-  change_type: 'create' | 'sub' | 'add' | 'remove' | 'time' | 'cancel' | 'restore'
+  change_type: 'create' | 'sub' | 'add' | 'remove' | 'time' | 'cancel' | 'restore' | 'details'
   event_id: string
   removed_coach_id: string | null
   added_coach_id: string | null
@@ -45,6 +45,9 @@ export function describeChange(change: ScheduleChangeRow, coachName: (id: string
       return 'Restored the cancelled session'
     case 'create':
       return 'Created the session'
+    case 'details':
+      // 0031: location/program/name from a Sprocket re-import; the reason says what changed.
+      return 'Session details changed'
   }
 }
 
