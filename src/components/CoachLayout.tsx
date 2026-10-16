@@ -26,6 +26,7 @@ export const CoachLayout = ({ children }: { children: ReactNode }) => {
           selectedKeys={[location.pathname]}
           style={{ flex: 1 }}
           items={[
+            { key: '/', label: <Link to="/">Home</Link> },
             ...(isScheduler ? [{ key: '/schedule', label: <Link to="/schedule">Schedule</Link> }] : []),
             ...(isCoach
               ? [

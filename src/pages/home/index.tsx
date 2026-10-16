@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { Card, Col, Row, Typography } from 'antd'
+import { Typography } from 'antd'
 import {
   AuditOutlined,
   CalendarOutlined,
@@ -19,14 +18,11 @@ import {
   CarryOutOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { Link } from 'react-router'
-
-type Tile = { to: string; title: string; description: string; icon: ReactNode }
-type Section = { title: string; tiles: Tile[] }
+import { TileGrid, type TileSection } from '../../components/TileGrid'
 
 // Admin landing page (Justin, 2026-10-16): one tile per screen, grouped by
 // the job it's part of, instead of landing on the Coaches list.
-const SECTIONS: Section[] = [
+const SECTIONS: TileSection[] = [
   {
     title: 'Payroll',
     tiles: [
@@ -156,33 +152,6 @@ export const Home = () => (
     <Typography.Title level={3} style={{ marginTop: 0 }}>
       Next Step Timesheets
     </Typography.Title>
-    {SECTIONS.map((section) => (
-      <div key={section.title} style={{ marginBottom: 24 }}>
-        <Typography.Title level={5} type="secondary" style={{ marginBottom: 12 }}>
-          {section.title}
-        </Typography.Title>
-        <Row gutter={[16, 16]}>
-          {section.tiles.map((tile) => (
-            <Col key={tile.to} xs={24} sm={12} lg={8} xl={6}>
-              <Link to={tile.to} style={{ display: 'block', height: '100%' }}>
-                <Card hoverable style={{ height: '100%' }} styles={{ body: { padding: 16 } }}>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                    <div style={{ fontSize: 24, color: '#1677ff', lineHeight: 1 }}>{tile.icon}</div>
-                    <div>
-                      <Typography.Text strong style={{ fontSize: 15 }}>
-                        {tile.title}
-                      </Typography.Text>
-                      <Typography.Paragraph type="secondary" style={{ margin: '4px 0 0', fontSize: 13 }}>
-                        {tile.description}
-                      </Typography.Paragraph>
-                    </div>
-                  </div>
-                </Card>
-              </Link>
-            </Col>
-          ))}
-        </Row>
-      </div>
-    ))}
+    <TileGrid sections={SECTIONS} />
   </div>
 )

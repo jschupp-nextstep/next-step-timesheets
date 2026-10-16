@@ -20,6 +20,7 @@ import { UpdatePassword } from './pages/auth/UpdatePassword'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
 
 const Home = lazy(() => import('./pages/home').then((m) => ({ default: m.Home })))
+const RoleHome = lazy(() => import('./pages/home/RoleHome').then((m) => ({ default: m.RoleHome })))
 const CoachList = lazy(() => import('./pages/coaches/list').then((m) => ({ default: m.CoachList })))
 const CoachCreate = lazy(() => import('./pages/coaches/create').then((m) => ({ default: m.CoachCreate })))
 const CoachEdit = lazy(() => import('./pages/coaches/edit').then((m) => ({ default: m.CoachEdit })))
@@ -194,7 +195,7 @@ const AdminRoutes = () => (
 const CoachRoutes = () => (
   <CoachLayout>
     <Routes>
-      <Route index element={<Navigate to="/log-session" replace />} />
+      <Route index element={<RoleHome />} />
       <Route path="/log-session" element={<LogSession />} />
       <Route path="/log-session/edit/:id" element={<LogSession />} />
       <Route path="/log-session/confirm/:eventId" element={<LogSession />} />
@@ -211,7 +212,7 @@ const CoachRoutes = () => (
 const SchedulerRoutes = ({ isCoach }: { isCoach: boolean }) => (
   <CoachLayout>
     <Routes>
-      <Route index element={<Navigate to="/schedule" replace />} />
+      <Route index element={<RoleHome />} />
       <Route path="/schedule" element={<Schedule />} />
       <Route path="/schedule/event/:id" element={<ScheduleEvent />} />
       {isCoach && (

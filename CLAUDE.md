@@ -254,8 +254,11 @@ with no equivalent need here.
 
 **Admin home page (2026-10-16):** admins land on `/` (`src/pages/home`) — tiles for every admin
 screen grouped Payroll / Schedule / People & rates / Setup, each with a one-line description
-(Justin: landing on the Coaches list felt off). "Home" is the first sidebar item. Add a tile when
-adding an admin screen.
+(Justin: landing on the Coaches list felt off). "Home" is the first sidebar item. Coaches and
+schedulers get the same thing (`src/pages/home/RoleHome.tsx`, "Home" in their top menu): Schedule
+for schedulers; Log a Session, My Sessions, and "Don't see something you coached?" for coaches; a
+scheduler who coaches sees both groups. Tiles come from `src/components/TileGrid.tsx` — add one
+when adding a screen.
 
 ### Before coach rollout (to-do)
 
