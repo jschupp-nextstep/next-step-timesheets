@@ -252,6 +252,11 @@ with no equivalent need here.
 
 ---
 
+**Admin home page (2026-10-16):** admins land on `/` (`src/pages/home`) — tiles for every admin
+screen grouped Payroll / Schedule / People & rates / Setup, each with a one-line description
+(Justin: landing on the Coaches list felt off). "Home" is the first sidebar item. Add a tile when
+adding an admin screen.
+
 ### Before coach rollout (to-do)
 
 Found 2026-10-12: only 1 of 61 active coaches (TEST COACH) has an email on the roster, so

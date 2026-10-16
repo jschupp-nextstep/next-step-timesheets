@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import { Authenticated, Refine, useGetIdentity, useLogout } from '@refinedev/core'
 import { ErrorComponent, ThemedLayout, useNotificationProvider } from '@refinedev/antd'
 import { dataProvider } from '@refinedev/supabase'
-import routerBindings, { DocumentTitleHandler, NavigateToResource } from '@refinedev/react-router'
+import routerBindings, { DocumentTitleHandler } from '@refinedev/react-router'
 import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router'
 import { Alert, App as AntdApp, Button, ConfigProvider, Spin } from 'antd'
 
@@ -19,6 +19,7 @@ import { Login } from './pages/auth/Login'
 import { UpdatePassword } from './pages/auth/UpdatePassword'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
 
+const Home = lazy(() => import('./pages/home').then((m) => ({ default: m.Home })))
 const CoachList = lazy(() => import('./pages/coaches/list').then((m) => ({ default: m.CoachList })))
 const CoachCreate = lazy(() => import('./pages/coaches/create').then((m) => ({ default: m.CoachCreate })))
 const CoachEdit = lazy(() => import('./pages/coaches/edit').then((m) => ({ default: m.CoachEdit })))
@@ -126,7 +127,7 @@ const UpdateBanner = () => {
 const AdminRoutes = () => (
   <ThemedLayout>
     <Routes>
-      <Route index element={<NavigateToResource resource="coaches" />} />
+      <Route index element={<Home />} />
       <Route path="/coaches">
         <Route index element={<CoachList />} />
         <Route path="create" element={<CoachCreate />} />
@@ -320,6 +321,11 @@ function App() {
               authProvider={authProvider}
               notificationProvider={useNotificationProvider}
               resources={[
+                {
+                  name: 'home',
+                  list: '/',
+                  meta: { label: 'Home' },
+                },
                 {
                   name: 'coaches',
                   list: '/coaches',
