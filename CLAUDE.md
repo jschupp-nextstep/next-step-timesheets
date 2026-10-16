@@ -259,6 +259,9 @@ schedulers get the same thing (`src/pages/home/RoleHome.tsx`, "Home" in their to
 for schedulers; Log a Session, My Sessions, and "Don't see something you coached?" for coaches; a
 scheduler who coaches sees both groups. Tiles come from `src/components/TileGrid.tsx` — add one
 when adding a screen.
+**Everyone lands on Home after signing in** (Justin, 2026-10-16): the authenticated wrapper uses
+`appendCurrentPathToQuery={false}`, so the login page no longer carries `?to=<last page>` and
+password sign-in goes to `/`; magic links already returned to the site root.
 
 ### Before coach rollout (to-do)
 

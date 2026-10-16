@@ -442,7 +442,7 @@ function App() {
                   <Route
                     path="/*"
                     element={
-                      <Authenticated key="authenticated-routes" redirectOnFail="/login">
+                      <Authenticated key="authenticated-routes" redirectOnFail="/login" appendCurrentPathToQuery={false}>
                         <AuthenticatedShell />
                       </Authenticated>
                     }
