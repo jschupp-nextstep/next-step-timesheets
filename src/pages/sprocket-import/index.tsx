@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { Alert, App, Button, Card, Select, Space, Table, Typography, Upload } from 'antd'
+import { Alert, App, Button, Card, Progress, Select, Space, Table, Typography, Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
 
 import { supabaseClient } from '../../utility/supabaseClient'
@@ -180,6 +180,9 @@ export const SprocketImport = () => {
   const [existingBySprocketId, setExistingBySprocketId] = useState<Map<string, string>>(new Map())
   const [matchError, setMatchError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  // Shown in place of the mapping screen while the import runs (Justin: the
+  // old screen gave no sign it was working, or that it had finished).
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [summary, setSummary] = useState<ImportSummary | null>(null)
 
   const { result: programsResult } = useList<IdName>({
@@ -346,6 +349,8 @@ export const SprocketImport = () => {
   const runImport = async () => {
     if (!parsed) return
     setImporting(true)
+    setProgress({ done: 0, total: parsed.length })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     try {
       const minDate = parsed.reduce((min, e) => (e.eventDate < min ? e.eventDate : min), parsed[0].eventDate)
       const maxDate = parsed.reduce((max, e) => (e.eventDate > max ? e.eventDate : max), parsed[0].eventDate)
@@ -397,7 +402,8 @@ export const SprocketImport = () => {
         ignoredEvents.push(describeEvent(event, reason))
       }
 
-      for (const event of parsed) {
+      for (const [index, event] of parsed.entries()) {
+        setProgress({ done: index, total: parsed.length })
         const blockKey = keyForEvent(event.locationName, event.eventDate)
         const locationId = locationMap[blockKey]
         if (locationId === IGNORE) {
@@ -560,6 +566,7 @@ export const SprocketImport = () => {
         ignoredEvents,
       })
       message.success('Import complete')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setImporting(false)
     }
@@ -576,14 +583,26 @@ export const SprocketImport = () => {
         instead of duplicating them.
       </Typography.Paragraph>
 
-      <Upload.Dragger beforeUpload={handleFile} accept=".csv" showUploadList={false} maxCount={1}>
-        <p className="ant-upload-drag-icon">
-          <InboxOutlined />
-        </p>
-        <p>Click or drag a Sprocket CSV export here</p>
-      </Upload.Dragger>
+      {!importing && !summary && (
+        <Upload.Dragger beforeUpload={handleFile} accept=".csv" showUploadList={false} maxCount={1}>
+          <p className="ant-upload-drag-icon">
+            <InboxOutlined />
+          </p>
+          <p>Click or drag a Sprocket CSV export here</p>
+        </Upload.Dragger>
+      )}
 
-      {parseErrors.length > 0 && (
+      {importing && (
+        <Card style={{ marginTop: 16 }}>
+          <Typography.Title level={4} style={{ marginTop: 0 }}>
+            Importing… {progress.done} of {progress.total} sessions
+          </Typography.Title>
+          <Progress percent={progress.total ? Math.round((progress.done / progress.total) * 100) : 0} />
+          <Typography.Text type="secondary">Keep this page open until it finishes.</Typography.Text>
+        </Card>
+      )}
+
+      {parseErrors.length > 0 && !importing && !summary && (
         <Alert
           style={{ marginTop: 16 }}
           type="warning"
@@ -592,7 +611,7 @@ export const SprocketImport = () => {
         />
       )}
 
-      {parsed && (
+      {parsed && !importing && !summary && (
         <>
           <Alert
             style={{ marginTop: 16 }}
@@ -841,9 +860,25 @@ export const SprocketImport = () => {
 
       {summary && (
         <>
+          <Space style={{ marginTop: 16 }}>
+            <Typography.Title level={4} style={{ margin: 0 }}>
+              Import complete
+            </Typography.Title>
+            <Button
+              onClick={() => {
+                setSummary(null)
+                setParsed(null)
+                setParseErrors([])
+                setSkippedRows([])
+              }}
+            >
+              Import another file
+            </Button>
+          </Space>
           <Alert
             style={{ marginTop: 16 }}
             type="success"
+            showIcon
             message="Import summary"
             description={
               <ul style={{ marginBottom: 0 }}>
@@ -851,7 +886,7 @@ export const SprocketImport = () => {
                 <li>{summary.eventsUpdated} previously imported events updated from Sprocket</li>
                 <li>{summary.eventsUnchanged} previously imported events unchanged</li>
                 <li>{summary.eventsSkippedExisting} events already existed, skipped</li>
-                <li>{summary.eventsSkippedUnresolved} events skipped (unresolved program/location)</li>
+                <li>{summary.eventsSkippedUnresolved} events skipped (program or location left for later)</li>
                 <li>{summary.eventsSkippedIgnored} events intentionally not imported (marked "don't import")</li>
                 <li>{summary.assignmentsCreated} staff assignments created</li>
                 <li>{summary.assignmentsSkippedUnmatched} assignments skipped (unmatched coach)</li>
