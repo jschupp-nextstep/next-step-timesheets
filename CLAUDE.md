@@ -319,6 +319,10 @@ Importer behavior now:
 - DSSC and Dover-Sherborn Academy → Town Sessions (Justin); program names match loosely (season
   suffix, case, plural).
 - `Fall Calendar.csv` (gitignored) backs a parser test against the real file.
+- **Wrong-file guard** (`src/utility/importFileCheck.ts`, both importers, 2026-10-16): refuses a
+  non-.csv file (Justin dragged in the Numbers copy — `accept=".csv"` doesn't filter drag-and-drop)
+  and a file meant for the other importer (Sprocket headers on Bulk Import, or vice versa), with a
+  message saying where it goes, before any parsing.
 
 **Location TBD + details on re-import (`0031_location_tbd.sql`, Justin 2026-10-15):** an unmapped
 (non-Camp) location imports at a real `Location TBD` location instead of being skipped (Justin:

@@ -4,6 +4,7 @@ import { Alert, App, Button, Card, Select, Space, Table, Typography, Upload } fr
 import { InboxOutlined } from '@ant-design/icons'
 
 import { supabaseClient } from '../../utility/supabaseClient'
+import { checkImportFile } from '../../utility/importFileCheck'
 import {
   parseBulkImportCsv,
   type DuplicateRowGroup,
@@ -92,6 +93,11 @@ export const BulkImport = () => {
 
   const handleFile = async (file: File) => {
     const text = await file.text()
+    const wrongFile = checkImportFile(file.name, text, 'bulk')
+    if (wrongFile) {
+      message.error({ content: wrongFile, duration: 8 })
+      return false
+    }
     const { events, errors, duplicateGroups: dupes } = parseBulkImportCsv(text)
     setParsed(events)
     setParseErrors(errors)
