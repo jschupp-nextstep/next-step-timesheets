@@ -185,7 +185,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 2 | Coach-facing flow: log a session (program → event → submit) + "my sessions" view with date picker and logged/missing status. Bespoke, hand-built — not accelerated by Refine boilerplate. | ✅ Done, plus coach self-service edit/delete on pending entries (not originally scoped) |
 | 3 | Payroll views — Payment Due equivalent, payment status toggle, Paychex/Zoho exports | 🟡 Payment Due + toggle + Zoho export done; no Paychex export exists. Confirmed acceptable — W-2 pay runs through a separate service outside this app; only one-off `admin_only` entries (stipends) for a W-2 coach have no export path today, though Payment Due still tracks them and reimbursements already flow into the Zoho CSV regardless of pay_type |
 | 4 | Reconciliation rework — likely smaller than today's system once events are real records | ✅ Done, plus the 1v1 oversight-fee approval workflow (not originally scoped) |
-| 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer, admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket + importer reconciliation upgrade still blocked on the bulk-import template — see "Where things stand right now" |
+| 5 (stretch) | Auto-populate events from Rob's calendar/Sprocket instead of manual entry | 🟡 Sprocket importer (incl. re-import by Sprocket ID, 2026-10-15), admin scheduling board, coach tap-to-confirm, and swap requests done; export-to-Sprocket not built — see "Where things stand right now" |
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
 | 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9 done 2026-10-14 (routine scheduler adds skip review; Luis's scheduler login deferred — Justin schedules AP himself for now) |
@@ -232,37 +232,18 @@ manually via the Supabase SQL Editor (no working Supabase CLI auth as of this se
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
 
-**Active work — Phase 5.** `events`/`event_assignments` get populated by importing a Sprocket
-calendar CSV export (one-way, manual, admin-run from `/sprocket-import`), or, as of the scheduling
-& coach-confirmation work below, by hand from the admin Schedule Board. There's still no way to
-push events created here back out to Sprocket. Goal: make the app the actual source of truth
-rather than a mirror of Sprocket. Two pieces were identified; the first is done:
+**Phase 5 status (updated 2026-10-16).** `events`/`event_assignments` are populated by the Sprocket
+importer (`/sprocket-import`, now matching by Sprocket's event ID — see "Sprocket fall import
+upgrade" below), the native bulk importer, or by hand on the Schedule Board. The Sprocket import
+template has landed (its layout = the export's columns), so the earlier "blocked on the template"
+notes are obsolete. The re-import policy as built: Sprocket wins only for what Sprocket changed
+since the last import and nobody changed here, and only for Sprocket-sourced assignments (the older
+"Sprocket's data wins, straight overwrite" policy was superseded in R2).
 
-1. ~~**Admin coach-assignment UI**~~ — ✅ done, see "Phase 5 continued" below (the Schedule Board).
-2. **Export to Sprocket** — a CSV formatted for Sprocket's bulk-import template (shape TBD; the
-   template file was supposed to be shared into the project folder but hasn't landed yet due to a
-   filesystem permission issue reading the user's Downloads folder — needed before this can be
-   designed).
-
-**Decided reconciliation policy** (this changes `/sprocket-import`'s behavior, not just adds to
-it): on re-import, if an event is recognized as one already in the app, **Sprocket's data wins —
-straight overwrite of assignments/time/cancellation, no merge**. The app stays authoritative only
-for events Sprocket doesn't have yet. Concretely this requires two changes to the importer, not
-yet made:
-- The existing dedup signature (`program_id, location_id, event_date, start_time, end_time,
-  session_name`) bakes mutable fields (time, and implicitly cancellation) into event *identity*.
-  That has to be narrowed to just the fields that name *which* event this is (date, location,
-  program, session name/title), so a Sprocket-side time correction updates the existing event
-  instead of silently creating a duplicate. ~~Known unavoidable gap: since Sprocket's own export has
-  no stable event ID (confirmed by reading its CSV shape), a genuine reschedule to a different
-  date is indistinguishable from "old event cancelled, new one created."~~ *Probably avoidable
-  after all — see the `ClubCalendarEventID` correction in "Data model" above; worth confirming
-  that ID survives a re-export before relying on it.*
-- `event_assignments` handling changes from add-only to delete-and-replace on a recognized match,
-  so a dropped/swapped coach in Sprocket actually gets removed here too, not just appended to.
-
-Item 2 (export) and the importer reconciliation upgrade above are both still blocked on seeing
-Sprocket's actual bulk-import column layout.
+**Still not built: export to Sprocket** — a CSV in the template's layout pushing app-side changes
+(times, cancellations, coach names into Notes) back to Sprocket. Each imported event stores its raw
+Sprocket rows (`sprocket_rows`) so this can be "stored row with our changes overlaid"; events
+created only in the app have no Sprocket TeamID/ProgramID and would need a mapping.
 
 Not carried forward from the old system: the script-pusher/Cloud project/Apps Script API
 infrastructure, and the debugging detours that produced it (Drive upload conversion, OAuth scopes,
