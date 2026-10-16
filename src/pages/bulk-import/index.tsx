@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { Alert, App, Button, Card, Select, Space, Table, Typography, Upload } from 'antd'
+import { Alert, App, Button, Card, Progress, Select, Space, Table, Typography, Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
 
 import { supabaseClient } from '../../utility/supabaseClient'
@@ -57,6 +57,9 @@ export const BulkImport = () => {
   const [locationMap, setLocationMap] = useState<Record<string, string | null>>({})
   const [coachMap, setCoachMap] = useState<Record<string, string | null>>({})
   const [importing, setImporting] = useState(false)
+  // Same as the Sprocket importer: a progress screen while it runs, then
+  // only the result (Justin, 2026-10-16).
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [summary, setSummary] = useState<ImportSummary | null>(null)
 
   const { result: programsResult } = useList<IdName>({
@@ -159,6 +162,8 @@ export const BulkImport = () => {
   const runImport = async () => {
     if (!parsed) return
     setImporting(true)
+    setProgress({ done: 0, total: parsed.length })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     try {
       const minDate = parsed.reduce((min, e) => (e.eventDate < min ? e.eventDate : min), parsed[0].eventDate)
       const maxDate = parsed.reduce((max, e) => (e.eventDate > max ? e.eventDate : max), parsed[0].eventDate)
@@ -196,7 +201,8 @@ export const BulkImport = () => {
         reason,
       })
 
-      for (const event of parsed) {
+      for (const [index, event] of parsed.entries()) {
+        setProgress({ done: index, total: parsed.length })
         const programId = programMap[event.programName]
         const locationId = locationMap[event.locationName]
 
@@ -271,6 +277,7 @@ export const BulkImport = () => {
         ignoredEvents,
       })
       message.success('Import complete')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setImporting(false)
     }
@@ -287,14 +294,26 @@ export const BulkImport = () => {
         coaches from that time, e.g. a game's warm-up; leave it blank for practices.
       </Typography.Paragraph>
 
-      <Upload.Dragger beforeUpload={handleFile} accept=".csv" showUploadList={false} maxCount={1}>
-        <p className="ant-upload-drag-icon">
-          <InboxOutlined />
-        </p>
-        <p>Click or drag a bulk-import CSV here</p>
-      </Upload.Dragger>
+      {!importing && !summary && (
+        <Upload.Dragger beforeUpload={handleFile} accept=".csv" showUploadList={false} maxCount={1}>
+          <p className="ant-upload-drag-icon">
+            <InboxOutlined />
+          </p>
+          <p>Click or drag a bulk-import CSV here</p>
+        </Upload.Dragger>
+      )}
 
-      {parseErrors.length > 0 && (
+      {importing && (
+        <Card style={{ marginTop: 16 }}>
+          <Typography.Title level={4} style={{ marginTop: 0 }}>
+            Importing… {progress.done} of {progress.total} sessions
+          </Typography.Title>
+          <Progress percent={progress.total ? Math.round((progress.done / progress.total) * 100) : 0} />
+          <Typography.Text type="secondary">Keep this page open until it finishes.</Typography.Text>
+        </Card>
+      )}
+
+      {parseErrors.length > 0 && !importing && !summary && (
         <Alert
           style={{ marginTop: 16 }}
           type="warning"
@@ -303,7 +322,7 @@ export const BulkImport = () => {
         />
       )}
 
-      {duplicateGroups.length > 0 && (
+      {duplicateGroups.length > 0 && !importing && !summary && (
         <Alert
           style={{ marginTop: 16 }}
           type="error"
@@ -327,7 +346,7 @@ export const BulkImport = () => {
         />
       )}
 
-      {parsed && (
+      {parsed && !importing && !summary && (
         <>
           <Alert
             style={{ marginTop: 16 }}
@@ -423,9 +442,25 @@ export const BulkImport = () => {
 
       {summary && (
         <>
+          <Space style={{ marginTop: 16 }}>
+            <Typography.Title level={4} style={{ margin: 0 }}>
+              Import complete
+            </Typography.Title>
+            <Button
+              onClick={() => {
+                setSummary(null)
+                setParsed(null)
+                setParseErrors([])
+                setDuplicateGroups([])
+              }}
+            >
+              Import another file
+            </Button>
+          </Space>
           <Alert
             style={{ marginTop: 16 }}
             type="success"
+            showIcon
             message="Import summary"
             description={
               <ul style={{ marginBottom: 0 }}>

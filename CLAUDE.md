@@ -323,6 +323,10 @@ Importer behavior now:
   non-.csv file (Justin dragged in the Numbers copy — `accept=".csv"` doesn't filter drag-and-drop)
   and a file meant for the other importer (Sprocket headers on Bulk Import, or vice versa), with a
   message saying where it goes, before any parsing.
+- **Progress + result screen** (both importers, 2026-10-16): while importing, the mapping screen is
+  replaced by "Importing… N of M sessions" with a progress bar; when done, only the result shows
+  (at the top, with "Import another file"). Every other admin action is a single quick call that
+  already confirms with a message, so nothing else needed this.
 
 **Location TBD + details on re-import (`0031_location_tbd.sql`, Justin 2026-10-15):** an unmapped
 (non-Camp) location imports at a real `Location TBD` location instead of being skipped (Justin:
