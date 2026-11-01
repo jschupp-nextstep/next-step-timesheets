@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
 import { Button, Card, Empty, Space, Tag, Typography } from 'antd'
 import { LeftOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import dayjs from 'dayjs'
 
 import { describeScope, type ScopeLabelRow } from '../../utility/schedulerScopes'
@@ -32,6 +32,24 @@ const formatTimeRange = (start: string | null, end: string | null) => {
   return `${startLabel} – ${dayjs(`2000-01-01T${end}`).format('h:mm A')}`
 }
 
+// A link-style button inside the row's <Link>: runs its own action instead
+// of following the row link.
+const RowAction = ({ onClick, danger, children }: { onClick: () => void; danger?: boolean; children: React.ReactNode }) => (
+  <Button
+    size="small"
+    type="link"
+    danger={danger}
+    style={{ padding: 0 }}
+    onClick={(e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onClick()
+    }}
+  >
+    {children}
+  </Button>
+)
+
 // The scheduler's home screen: a phone-friendly, day-by-day list of the
 // events they manage (in_my_scope is a computed column backed by the same
 // is_scheduler_for_event() check RLS uses -- see 0017_roles.sql). Read-only
@@ -40,6 +58,7 @@ export const Schedule = () => {
   const [weekStart, setWeekStart] = useState(() => dayjs().startOf('day'))
   const weekEnd = weekStart.add(6, 'day')
   const [creating, setCreating] = useState(false)
+  const navigate = useNavigate()
   const [assigning, setAssigning] = useState<{ id: string; label: string; assignedIds: string[] } | null>(null)
 
   // Coach names come from coach_directory (names only), not coaches --
@@ -149,26 +168,37 @@ export const Schedule = () => {
                     ) : (
                       <Tag color="red">Unfilled</Tag>
                     )}
+                  </div>
+                  {/* Every action as a visible link (Justin, 2026-11-01: only
+                      + Assign was obvious; the rest needed clicking the row).
+                      The others open the event page with that dialog up. */}
+                  <Space size={16} wrap style={{ marginTop: 4 }}>
                     {!event.is_cancelled && (
-                      <Button
-                        size="small"
-                        type="link"
-                        style={{ padding: 0 }}
-                        onClick={(e) => {
-                          // Inside the row's link -- don't navigate.
-                          e.preventDefault()
-                          e.stopPropagation()
+                      <RowAction
+                        onClick={() =>
                           setAssigning({
                             id: event.id,
                             label: `${dayjs(event.event_date).format('ddd M/D')} ${formatTimeRange(event.start_time, event.end_time)}`,
                             assignedIds: event.event_assignments.map((a) => a.coach_id),
                           })
-                        }}
+                        }
                       >
                         + Assign
-                      </Button>
+                      </RowAction>
                     )}
-                  </div>
+                    {!event.is_cancelled && event.event_assignments.length > 0 && (
+                      <RowAction onClick={() => navigate(`/schedule/event/${event.id}?do=sub`)}>Sub</RowAction>
+                    )}
+                    <RowAction onClick={() => navigate(`/schedule/event/${event.id}?do=time`)}>Change time</RowAction>
+                    {event.is_cancelled ? (
+                      <RowAction onClick={() => navigate(`/schedule/event/${event.id}?do=restore`)}>Restore</RowAction>
+                    ) : (
+                      <RowAction danger onClick={() => navigate(`/schedule/event/${event.id}?do=cancel`)}>
+                        Cancel
+                      </RowAction>
+                    )}
+                    <RowAction onClick={() => navigate(`/schedule/event/${event.id}`)}>History ›</RowAction>
+                  </Space>
                 </Link>
               ))
             )}

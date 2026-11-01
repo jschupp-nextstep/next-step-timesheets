@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useGetIdentity, useList, useOne } from '@refinedev/core'
 import {
   Alert,
@@ -17,7 +17,7 @@ import {
   Typography,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { Link, useParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 
 import type { Identity } from '../../providers/authProvider'
 import { useScheduleAction, type ScheduleFunction } from '../../utility/scheduleActions'
@@ -79,6 +79,7 @@ export const ScheduleEvent = () => {
   const [newEnd, setNewEnd] = useState<Dayjs | null>(null)
   const [applyToSeries, setApplyToSeries] = useState(false)
   const [timing, setTiming] = useState<string | undefined>()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const { result: event, query: eventQuery } = useOne<EventRow>({
     resource: 'events',
@@ -115,6 +116,21 @@ export const ScheduleEvent = () => {
     setNewStart(event?.start_time ? dayjs(`2000-01-01T${event.start_time}`) : null)
     setNewEnd(event?.end_time ? dayjs(`2000-01-01T${event.end_time}`) : null)
   }
+
+  // ?do=sub|time|cancel|restore (from the Schedule list's row actions) opens
+  // that dialog once the event has loaded, then drops the param so a reload
+  // or Back doesn't reopen it. Sub opens directly only when there's exactly
+  // one coach; otherwise the person picks whom to sub on the list below.
+  const requested = searchParams.get('do')
+  useEffect(() => {
+    if (!requested || !event) return
+    const coaches = event.event_assignments
+    if (requested === 'sub' && coaches.length === 1) openAction({ kind: 'sub', coachId: coaches[0].coach_id })
+    else if (requested === 'time') openAction({ kind: 'time' })
+    else if (requested === 'cancel' && !event.is_cancelled) openAction({ kind: 'cancel' })
+    else if (requested === 'restore' && event.is_cancelled) openAction({ kind: 'restore' })
+    setSearchParams({}, { replace: true })
+  }, [requested, event])
 
   // Deliberately NOT pre-validating permission or required fields beyond
   // what's needed to build the call: the database is the authority, and its
