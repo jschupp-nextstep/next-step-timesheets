@@ -33,7 +33,7 @@ begin
     returning id into v_loc;
 
   update coaches set is_active = true where id = v_coach;
-  insert into rates (coach_id, program_id, rate) values (v_coach, v_prog, 50);
+  insert into rates (coach_id, program_id, hourly_rate) values (v_coach, v_prog, 50);
 
   insert into schedulers (name, email) values ('TEST SCHEDULER', 'schupp.14+scheduler@gmail.com')
     on conflict (email) do update set is_active = true, name = 'TEST SCHEDULER'
