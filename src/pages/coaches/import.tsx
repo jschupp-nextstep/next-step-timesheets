@@ -17,7 +17,7 @@ import {
   Typography,
   Upload,
 } from 'antd'
-import { UploadOutlined } from '@ant-design/icons'
+import { DownloadOutlined, UploadOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { Link } from 'react-router'
 
@@ -36,6 +36,25 @@ import { applyCoachRates, type ApplyResult } from './applyCoachRates'
 
 const SKIP = '__skip'
 const NEW = '__new'
+
+// Every column the importer reads, with examples: an existing coach (only
+// the first three columns matter) and a new coach on two rows (details on
+// either row; blank Initials are made from the name).
+const TEMPLATE = [
+  'Coach Name,Program Type,Hourly Rate,Initials,Email,Pay Type',
+  'Keith Thompson,Coaching,40,,,',
+  'Pat Example,Coaching,30,PE,pat@example.com,1099',
+  'Pat Example,Camp-Full Day,25,,,',
+].join('\n')
+
+const downloadTemplate = () => {
+  const url = URL.createObjectURL(new Blob([TEMPLATE + '\n'], { type: 'text/csv' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'coaches-and-rates-template.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 const money = (n: number) => `$${Number(n).toFixed(2).replace(/\.00$/, '')}`
 
@@ -172,7 +191,8 @@ export const CoachImport = () => {
       <Typography.Paragraph type="secondary">
         Paste rows from a spreadsheet, or upload a CSV, with columns <strong>Coach Name</strong>, <strong>Program Type</strong>,{' '}
         <strong>Hourly Rate</strong>. Optional columns for new coaches: <strong>Initials</strong>, <strong>Email</strong>,{' '}
-        <strong>Pay Type</strong> (1099 or W-2). Nothing is saved until you confirm.
+        <strong>Pay Type</strong> (1099 or W-2). One row per rate; program names must match{' '}
+        <Link to="/programs">Programs</Link>. Nothing is saved until you confirm.
       </Typography.Paragraph>
 
       <Card size="small" style={{ marginBottom: 16 }}>
@@ -199,6 +219,9 @@ export const CoachImport = () => {
           >
             <Button icon={<UploadOutlined />}>Upload CSV</Button>
           </Upload>
+          <Button icon={<DownloadOutlined />} onClick={downloadTemplate}>
+            Download template
+          </Button>
         </Space>
       </Card>
 
