@@ -263,6 +263,18 @@ when adding a screen.
 `appendCurrentPathToQuery={false}`, so the login page no longer carries `?to=<last page>` and
 password sign-in goes to `/`; magic links already returned to the site root.
 
+**User guides + guided test run (2026-11-01).** Three Claude Docs guides — [Coach](https://claude.ai/code/artifact/336e64d0-c8af-413f-a1c7-a0070eccdd77),
+[Scheduler](https://claude.ai/code/artifact/95b9468a-c1f3-4074-81d1-407e362d6879),
+[Admin](https://claude.ai/code/artifact/e6ffcece-e5c5-4f04-a99c-c3260b65aa15). Justin walked all three
+end to end on test data from `supabase/checks/test_run_setup.sql` (TEST LOCATION, TEST SCHEDULER,
+five "TEST -" sessions) and removed it with `test_run_cleanup.sql` (all counts 0 — note it also
+deletes *every* TEST COACH entry, incl. the old July pre-cutover ones). Everything matched the
+guides; changes it led to: the scheduler Schedule list shows **+ Assign · Sub · Change time ·
+Cancel/Restore · History ›** on every row (each opens the event page with that dialog up via
+`?do=`; before, everything but + Assign needed clicking the row), and the Sub dialog explains that
+coaches already on the session aren't in its list (use Remove instead). Hold stays on Timesheet
+Entries only (Justin: fine there for now). Rerun the same scripts for future walkthroughs.
+
 ### Before coach rollout (to-do)
 
 Found 2026-10-12: only 1 of 61 active coaches (TEST COACH) has an email on the roster, so
