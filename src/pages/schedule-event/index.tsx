@@ -305,6 +305,16 @@ export const ScheduleEvent = () => {
               Replacing <strong>{coachName(action.coachId)}</strong>. They'll no longer see this session; the sub will.
             </Typography.Paragraph>
           )}
+          {/* Coaches already on the session aren't in the Sub list (Justin
+              hunted for one during the 2026-11-01 test run). */}
+          {action?.kind === 'sub' && event.event_assignments.length > 1 && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={`Coaches already on this session aren't in the list. If one of them is taking over, close this and use Remove on ${coachName(action.coachId)} instead.`}
+            />
+          )}
           {action?.kind === 'remove' && (
             <Typography.Paragraph>
               Removing <strong>{coachName(action.coachId)}</strong>. If they already confirmed hours, their entry stays and
