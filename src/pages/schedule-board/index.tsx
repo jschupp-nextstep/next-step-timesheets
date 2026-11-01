@@ -8,6 +8,7 @@ import { Link } from 'react-router'
 
 import { useScheduleAction } from '../../utility/scheduleActions'
 import { CancelDayButton } from '../../components/CancelDayButton'
+import { staffPickerOptions } from '../../utility/staffType'
 
 type Assignment = {
   id: string
@@ -161,7 +162,7 @@ export const ScheduleBoard = () => {
               style={{ width: '100%' }}
               placeholder="Select coach(es)"
               value={draftCoachIds}
-              options={coaches.map((c) => ({ label: c.name, value: c.id }))}
+              options={staffPickerOptions(coaches)}
               onChange={(value) => setDraftCoachIds(value)}
               optionFilterProp="label"
             />

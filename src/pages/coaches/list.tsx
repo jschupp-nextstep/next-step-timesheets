@@ -4,6 +4,8 @@ import { Button, Space, Switch, Table, Tag } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 
+import { STAFF_TYPE_COLOR, STAFF_TYPE_LABEL, STAFF_TYPE_OPTIONS, type StaffType } from '../../utility/staffType'
+
 type Coach = {
   id: string
   name: string
@@ -11,6 +13,7 @@ type Coach = {
   email: string | null
   is_active: boolean
   pay_type: '1099' | 'w2'
+  staff_type: StaffType
 }
 
 export const CoachList = () => {
@@ -38,6 +41,12 @@ export const CoachList = () => {
           render={(name: string, record: Coach) => <Link to={`/coaches/show/${record.id}`}>{name}</Link>}
         />
         <Table.Column dataIndex="initials" title="Initials" />
+        <Table.Column
+          dataIndex="staff_type"
+          title="Staff type"
+          filters={STAFF_TYPE_OPTIONS.map((o) => ({ text: o.label, value: o.value }))}
+          render={(value: StaffType) => <Tag color={STAFF_TYPE_COLOR[value]}>{STAFF_TYPE_LABEL[value] ?? value}</Tag>}
+        />
         <Table.Column dataIndex="email" title="Email" render={(v) => v ?? '—'} />
         <Table.Column
           dataIndex="pay_type"

@@ -3,6 +3,7 @@ import { useList } from '@refinedev/core'
 import { Input, Modal, Select, Typography } from 'antd'
 
 import { useScheduleAction } from '../../utility/scheduleActions'
+import { staffPickerOptions, type StaffType } from '../../utility/staffType'
 
 // R9: staff a session from the schedule list without opening it -- e.g.
 // Luis assigning the week's AP coaches. One logged schedule_add per coach;
@@ -19,7 +20,7 @@ export const AssignCoachesModal = ({
   const { run, running } = useScheduleAction()
   const [coachIds, setCoachIds] = useState<string[]>([])
   const [reason, setReason] = useState('Scheduled')
-  const { result } = useList<{ id: string; name: string; is_active: boolean }>({
+  const { result } = useList<{ id: string; name: string; is_active: boolean; staff_type?: StaffType }>({
     resource: 'coach_directory',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'name', order: 'asc' }],
@@ -59,9 +60,7 @@ export const AssignCoachesModal = ({
         style={{ width: '100%' }}
         value={coachIds}
         onChange={setCoachIds}
-        options={(result?.data ?? [])
-          .filter((c) => !event?.assignedIds.includes(c.id))
-          .map((c) => ({ label: c.name, value: c.id }))}
+        options={staffPickerOptions((result?.data ?? []).filter((c) => !event?.assignedIds.includes(c.id)))}
       />
       <Typography.Text style={{ display: 'block', marginTop: 12 }}>Reason</Typography.Text>
       <Input value={reason} onChange={(e) => setReason(e.target.value)} />

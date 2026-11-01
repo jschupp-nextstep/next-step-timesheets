@@ -97,7 +97,7 @@ describe('buildImportPlan', () => {
     )
     expect(plan.rates.find((r) => r.coachKey === 'c3')).toMatchObject({ programName: 'Camp-Full Day', rate: 35, status: 'new' })
     expect(plan.newCoaches).toEqual([
-      { key: 'new:tanner michelson', name: 'Tanner Michelson', initials: 'TM', email: null, payType: '1099' },
+      { key: 'new:tanner michelson', name: 'Tanner Michelson', initials: 'TM', email: null, payType: '1099', staffType: 'coach' },
     ])
     expect(plan.conflicts).toEqual([
       { coachName: 'Tanner Michelson', programName: 'Camp-Full Day', rows: [7, 8], rates: [20, 22] },

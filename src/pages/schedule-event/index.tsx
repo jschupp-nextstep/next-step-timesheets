@@ -28,6 +28,7 @@ import {
   formatTimeRange,
   type ScheduleChangeRow,
 } from '../../utility/scheduleChanges'
+import { staffPickerOptions, type StaffType } from '../../utility/staffType'
 
 type Assignment = { id: string; coach_id: string; covering_for_coach_id: string | null; source: string }
 type EventRow = {
@@ -43,7 +44,7 @@ type EventRow = {
   locations: { name: string } | null
   event_assignments: Assignment[]
 }
-type DirectoryRow = { id: string; name: string; is_active: boolean }
+type DirectoryRow = { id: string; name: string; is_active: boolean; staff_type?: StaffType }
 
 type Action =
   | { kind: 'sub'; coachId: string }
@@ -329,7 +330,7 @@ export const ScheduleEvent = () => {
                 placeholder="Pick a coach"
                 value={inCoachId}
                 onChange={setInCoachId}
-                options={pickableCoaches.map((c) => ({ label: c.name, value: c.id }))}
+                options={staffPickerOptions(pickableCoaches)}
               />
             </Form.Item>
           )}

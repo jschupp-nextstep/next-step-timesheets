@@ -41,10 +41,11 @@ const NEW = '__new'
 // the first three columns matter) and a new coach on two rows (details on
 // either row; blank Initials are made from the name).
 const TEMPLATE = [
-  'Coach Name,Program Type,Hourly Rate,Initials,Email,Pay Type',
-  'Keith Thompson,Coaching,40,,,',
-  'Pat Example,Coaching,30,PE,pat@example.com,1099',
-  'Pat Example,Camp-Full Day,25,,,',
+  'Coach Name,Program Type,Hourly Rate,Initials,Email,Pay Type,Staff Type',
+  'Keith Thompson,Coaching,40,,,,',
+  'Pat Example,Coaching,30,PE,pat@example.com,1099,Coach',
+  'Pat Example,Camp-Full Day,25,,,,',
+  'Sam Example,Nurse-Full Day,45,SE,,1099,Nurse',
 ].join('\n')
 
 const downloadTemplate = () => {
@@ -191,7 +192,7 @@ export const CoachImport = () => {
       <Typography.Paragraph type="secondary">
         Paste rows from a spreadsheet, or upload a CSV, with columns <strong>Coach Name</strong>, <strong>Program Type</strong>,{' '}
         <strong>Hourly Rate</strong>. Optional columns for new coaches: <strong>Initials</strong>, <strong>Email</strong>,{' '}
-        <strong>Pay Type</strong> (1099 or W-2). One row per rate; program names must match{' '}
+        <strong>Pay Type</strong> (1099 or W-2), <strong>Staff Type</strong> (Coach, Nurse, or Operations). One row per rate; program names must match{' '}
         <Link to="/programs">Programs</Link>. Nothing is saved until you confirm.
       </Typography.Paragraph>
 
@@ -334,8 +335,8 @@ export const CoachImport = () => {
                           )}
                           {choice.kind === 'new' && (
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              Initials {plan.newCoaches.find((n) => n.key === `new:${key}`)?.initials}, 1099 unless the
-                              list says otherwise. Edit on their page afterwards.
+                              Initials {plan.newCoaches.find((n) => n.key === `new:${key}`)?.initials}; 1099 and Coach unless
+                              the list says otherwise. Edit on their page afterwards.
                             </Typography.Text>
                           )}
                         </Space>

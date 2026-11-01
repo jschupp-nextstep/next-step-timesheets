@@ -1,5 +1,7 @@
 import Papa from 'papaparse'
 
+import { parseStaffType, type StaffType } from './staffType'
+
 // Coaches & rates import (Justin, 2026-11-01): paste the rates sheet
 // (Coach Name / Program Type / Hourly Rate, tab- or comma-separated) or
 // upload a CSV; optional Initials / Email / Pay Type columns fill in new
@@ -14,6 +16,7 @@ export type ImportRow = {
   initials: string | null
   email: string | null
   payType: '1099' | 'w2' | null
+  staffType: StaffType | null
 }
 
 export type ParseResult = { rows: ImportRow[]; errors: string[] }
@@ -29,6 +32,7 @@ const HEADER_ALIASES: Record<string, keyof Omit<ImportRow, 'rowNumber'>> = {
   initials: 'initials',
   email: 'email',
   'pay type': 'payType',
+  'staff type': 'staffType',
 }
 
 export const normalizeName = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
@@ -80,6 +84,11 @@ export function parseCoachRates(text: string): ParseResult {
       errors.push(`Row ${rowNumber}: pay type "${get('payType')}" should be 1099 or W-2.`)
       return
     }
+    const staffType = parseStaffType(get('staffType'))
+    if (staffType === 'bad') {
+      errors.push(`Row ${rowNumber}: staff type "${get('staffType')}" should be Coach, Nurse, or Operations.`)
+      return
+    }
     const email = get('email').toLowerCase()
     rows.push({
       rowNumber,
@@ -89,6 +98,7 @@ export function parseCoachRates(text: string): ParseResult {
       initials: get('initials') || null,
       email: email || null,
       payType,
+      staffType,
     })
   })
   return { rows, errors }
@@ -138,7 +148,14 @@ export type ImportPlan = {
   unknownPrograms: { name: string; rows: number[] }[]
   // Not blocking: each needs a NameChoice (default skip).
   unmatchedNames: { name: string; rows: number[]; suggestion: CoachRef | null }[]
-  newCoaches: { key: string; name: string; initials: string; email: string | null; payType: '1099' | 'w2' }[]
+  newCoaches: {
+    key: string
+    name: string
+    initials: string
+    email: string | null
+    payType: '1099' | 'w2'
+    staffType: StaffType
+  }[]
   rates: PlannedRate[]
   skippedRows: number
 }
@@ -232,6 +249,7 @@ export function buildImportPlan(
           initials: existing?.initials ?? row.initials ?? suggestInitials(row.coachName),
           email: existing?.email ?? row.email,
           payType: existing?.payType ?? row.payType ?? '1099',
+          staffType: existing?.staffType ?? row.staffType ?? 'coach',
         })
       }
     }

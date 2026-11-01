@@ -22,8 +22,9 @@ import { Link, useParams } from 'react-router'
 import { ChangeRateModal, type ChangingRate } from '../../components/ChangeRateModal'
 import { currentRate, type RateRef } from '../../utility/coachRateImport'
 import { supabaseClient } from '../../utility/supabaseClient'
+import { STAFF_TYPE_COLOR, STAFF_TYPE_LABEL, type StaffType } from '../../utility/staffType'
 
-type Coach = { id: string; name: string; initials: string; email: string | null; pay_type: '1099' | 'w2'; is_active: boolean }
+type Coach = { id: string; name: string; initials: string; email: string | null; pay_type: '1099' | 'w2'; is_active: boolean; staff_type: StaffType }
 type Program = { id: string; name: string; entry_mode: string; is_active: boolean }
 type OneVOne = { id: string; session_fee: number; oversight_fee: number | null; is_active: boolean; oversight: { name: string } | null }
 type Weekly = {
@@ -149,6 +150,7 @@ export const CoachShow = () => {
         <Typography.Title level={3} style={{ margin: 0 }}>
           {coach.name}
         </Typography.Title>
+        <Tag color={STAFF_TYPE_COLOR[coach.staff_type]}>{STAFF_TYPE_LABEL[coach.staff_type] ?? coach.staff_type}</Tag>
         <Tag color={coach.is_active ? 'green' : 'default'}>{coach.is_active ? 'Active' : 'Inactive'}</Tag>
         <Link to={`/coaches/edit/${coach.id}`}>
           <Button size="small">Edit details</Button>

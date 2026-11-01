@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import { suggestInitials } from '../../utility/coachRateImport'
+import { STAFF_TYPE_OPTIONS, type StaffType } from '../../utility/staffType'
 
 type Program = { id: string; name: string; is_active: boolean }
 type Values = {
@@ -13,6 +14,7 @@ type Values = {
   initials: string
   email?: string | null
   pay_type: '1099' | 'w2'
+  staff_type: StaffType
   rates?: { program_id?: string; hourly_rate?: number }[]
 }
 
@@ -52,6 +54,7 @@ export const CoachCreate = () => {
           initials: values.initials.trim(),
           email: values.email || null,
           pay_type: values.pay_type,
+          staff_type: values.staff_type,
         })
         .select('id, name')
         .single()
@@ -93,7 +96,7 @@ export const CoachCreate = () => {
         form={form}
         layout="vertical"
         onFinish={save}
-        initialValues={{ pay_type: '1099', rates: [{}] }}
+        initialValues={{ pay_type: '1099', staff_type: 'coach', rates: [{}] }}
         onValuesChange={(changed: Partial<Values>) => {
           if (changed.name !== undefined && !initialsTouched) form.setFieldValue('initials', suggestInitials(changed.name))
         }}
@@ -113,6 +116,9 @@ export const CoachCreate = () => {
             extra="Lets this coach sign in. Leave blank if you don't have it yet."
           >
             <Input />
+          </Form.Item>
+          <Form.Item label="Staff type" name="staff_type" rules={[{ required: true }]}>
+            <Select options={STAFF_TYPE_OPTIONS} style={{ maxWidth: 240 }} />
           </Form.Item>
           <Form.Item
             label="Pay type"

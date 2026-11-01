@@ -5,6 +5,7 @@ import { App, DatePicker, Form, Input, InputNumber, Radio, Select, TimePicker } 
 import type { Dayjs } from 'dayjs'
 
 import { supabaseClient } from '../../utility/supabaseClient'
+import { staffPickerOptions } from '../../utility/staffType'
 
 type EventFormValues = {
   program_id: string
@@ -153,7 +154,7 @@ export const EventCreate = () => {
           <Select
             mode="multiple"
             placeholder="Select coach(es)"
-            options={coaches.map((c) => ({ label: c.name, value: c.id }))}
+            options={staffPickerOptions(coaches)}
             optionFilterProp="label"
           />
         </Form.Item>

@@ -1,6 +1,8 @@
 import { Edit, useForm } from '@refinedev/antd'
 import { Form, Input, Select, Switch } from 'antd'
 
+import { STAFF_TYPE_OPTIONS } from '../../utility/staffType'
+
 export const CoachEdit = () => {
   const { formProps, saveButtonProps } = useForm({ resource: 'coaches' })
 
@@ -21,6 +23,9 @@ export const CoachEdit = () => {
           extra="Lets this coach log in. Type their email here, then use Supabase's Invite user action for the same address."
         >
           <Input />
+        </Form.Item>
+        <Form.Item label="Staff type" name="staff_type" rules={[{ required: true }]}>
+          <Select options={STAFF_TYPE_OPTIONS} style={{ maxWidth: 240 }} />
         </Form.Item>
         <Form.Item
           label="Pay type"

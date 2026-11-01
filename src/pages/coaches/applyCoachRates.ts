@@ -32,7 +32,13 @@ export async function applyCoachRates(
   for (const coach of plan.newCoaches) {
     const { data, error } = await supabaseClient
       .from('coaches')
-      .insert({ name: coach.name, initials: coach.initials, email: coach.email, pay_type: coach.payType })
+      .insert({
+        name: coach.name,
+        initials: coach.initials,
+        email: coach.email,
+        pay_type: coach.payType,
+        staff_type: coach.staffType,
+      })
       .select('id')
       .single()
     if (error) result.failures.push(`Couldn't add ${coach.name}: ${error.message} (their rates were skipped)`)
