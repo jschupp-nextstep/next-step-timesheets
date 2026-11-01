@@ -87,7 +87,7 @@ const SECTIONS: TileSection[] = [
       {
         to: '/coaches',
         title: 'Coaches',
-        description: 'The roster: names, login emails, 1099/W-2, active or not.',
+        description: 'The roster. Open a coach to see and edit all their rates; add one, or import a list with rates.',
         icon: <TeamOutlined />,
       },
       {

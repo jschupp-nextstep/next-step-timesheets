@@ -24,6 +24,8 @@ const RoleHome = lazy(() => import('./pages/home/RoleHome').then((m) => ({ defau
 const CoachList = lazy(() => import('./pages/coaches/list').then((m) => ({ default: m.CoachList })))
 const CoachCreate = lazy(() => import('./pages/coaches/create').then((m) => ({ default: m.CoachCreate })))
 const CoachEdit = lazy(() => import('./pages/coaches/edit').then((m) => ({ default: m.CoachEdit })))
+const CoachShow = lazy(() => import('./pages/coaches/show').then((m) => ({ default: m.CoachShow })))
+const CoachImport = lazy(() => import('./pages/coaches/import').then((m) => ({ default: m.CoachImport })))
 const ProgramList = lazy(() => import('./pages/programs/list').then((m) => ({ default: m.ProgramList })))
 const ProgramCreate = lazy(() => import('./pages/programs/create').then((m) => ({ default: m.ProgramCreate })))
 const ProgramEdit = lazy(() => import('./pages/programs/edit').then((m) => ({ default: m.ProgramEdit })))
@@ -133,6 +135,8 @@ const AdminRoutes = () => (
         <Route index element={<CoachList />} />
         <Route path="create" element={<CoachCreate />} />
         <Route path="edit/:id" element={<CoachEdit />} />
+        <Route path="show/:id" element={<CoachShow />} />
+        <Route path="import" element={<CoachImport />} />
       </Route>
       <Route path="/programs">
         <Route index element={<ProgramList />} />
@@ -332,6 +336,7 @@ function App() {
                   list: '/coaches',
                   create: '/coaches/create',
                   edit: '/coaches/edit/:id',
+                  show: '/coaches/show/:id',
                   meta: { label: 'Coaches' },
                 },
                 {

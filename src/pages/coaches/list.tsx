@@ -1,6 +1,8 @@
-import { EditButton, List, useTable } from '@refinedev/antd'
+import { CreateButton, EditButton, List, useTable } from '@refinedev/antd'
 import { useUpdate } from '@refinedev/core'
-import { Space, Switch, Table, Tag } from 'antd'
+import { Button, Space, Switch, Table, Tag } from 'antd'
+import { UploadOutlined } from '@ant-design/icons'
+import { Link } from 'react-router'
 
 type Coach = {
   id: string
@@ -19,9 +21,22 @@ export const CoachList = () => {
   const { mutate } = useUpdate()
 
   return (
-    <List>
+    <List
+      headerButtons={
+        <>
+          <Link to="/coaches/import">
+            <Button icon={<UploadOutlined />}>Import coaches &amp; rates</Button>
+          </Link>
+          <CreateButton>Add a coach</CreateButton>
+        </>
+      }
+    >
       <Table {...tableProps} rowKey="id">
-        <Table.Column dataIndex="name" title="Name" />
+        <Table.Column
+          dataIndex="name"
+          title="Name"
+          render={(name: string, record: Coach) => <Link to={`/coaches/show/${record.id}`}>{name}</Link>}
+        />
         <Table.Column dataIndex="initials" title="Initials" />
         <Table.Column dataIndex="email" title="Email" render={(v) => v ?? '—'} />
         <Table.Column
