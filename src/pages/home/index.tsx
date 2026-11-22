@@ -1,5 +1,6 @@
 import { Typography } from 'antd'
 import {
+  ApartmentOutlined,
   AuditOutlined,
   CalendarOutlined,
   CloudUploadOutlined,
@@ -72,6 +73,12 @@ const SECTIONS: TileSection[] = [
         title: 'Import Calendar',
         description: "Upload a Sprocket export. New sessions are added; ones already imported update from Sprocket's changes.",
         icon: <CloudUploadOutlined />,
+      },
+      {
+        to: '/sprocket-mappings',
+        title: 'Sprocket Mappings',
+        description: "Sprocket's IDs for programs, teams, locations and fields, and which teams a new session gets.",
+        icon: <ApartmentOutlined />,
       },
       {
         to: '/bulk-import',

@@ -132,3 +132,54 @@ describe('parseSprocketCsv on the real fall export', () => {
     expect(events.filter((e) => !e.needsTeamCoach).length).toBeGreaterThan(200)
   })
 })
+
+describe('parseSprocketCsv combining a program\'s teams (Phase 9 AP merge)', () => {
+  const header = 'Title,StartDate,StartDateTime,EndDateTime,LocationName,ProgramID,ProgramName,TeamName,IsCancelled,ClubEventType,ClubCalendarEventID'
+  const csv = [
+    header,
+    'AP Practice,10/20/2026,05:30 PM,06:30 PM,Milot,14796,2025-26 Annual Program,Annual Program- Older AP Players,No,Practice,1',
+    'AP Practice,10/20/2026,05:30 PM,06:30 PM,Milot,14796,2025-26 Annual Program,Annual Program- Younger AP Players,Yes,Practice,2',
+    'AP Practice,10/20/2026,05:30 PM,06:30 PM,Milot,14796,2025-26 Annual Program,Annual Program- Jr. Academy,No,Practice,3',
+    'Junior AP,10/20/2026,05:30 PM,06:30 PM,Milot,14796,2025-26 Annual Program,AP Goalkeepers,No,Practice,8',
+    // Same program, different start: the split session stays separate.
+    'AP Practice,10/21/2026,06:30 PM,07:30 PM,Milot,14796,2025-26 Annual Program,Annual Program- Jr. Academy,No,Practice,4',
+    'AP Practice,10/21/2026,07:30 PM,08:30 PM,Milot,14796,2025-26 Annual Program,Annual Program- Older AP Players,No,Practice,5',
+    // Another program's teams at the same slot are never combined.
+    'Practice,10/20/2026,05:30 PM,06:30 PM,Milot,29173,DSSC,Lions,No,Practice,6',
+    'Practice,10/20/2026,05:30 PM,06:30 PM,Milot,29173,DSSC,Pumas,No,Practice,7',
+  ].join('\n')
+
+  it('makes one session per slot with one row per team', () => {
+    const { events } = parseSprocketCsv(csv, { combineProgramIds: new Set(['14796']) })
+    expect(events).toHaveLength(5)
+    const merged = events.find((e) => e.sprocketIds.length === 4)
+    expect(merged).toMatchObject({ sessionName: 'AP Practice / Junior AP', teamName: '2025-26 Annual Program', isCancelled: false })
+    expect(merged?.rows).toHaveLength(4)
+  })
+
+  it('is cancelled only when every team row is', () => {
+    const cancelled = csv.replace(/,No,Practice,(1|3|8)$/gm, ',Yes,Practice,$1')
+    const { events } = parseSprocketCsv(cancelled, { combineProgramIds: new Set(['14796']) })
+    expect(events.find((e) => e.sprocketIds.length === 4)?.isCancelled).toBe(true)
+  })
+
+  it('keeps one session per team without the option', () => {
+    expect(parseSprocketCsv(csv).events).toHaveLength(8)
+  })
+
+  it('on the real fall export, collapses the 62 AP rows into 29 sessions', () => {
+    let fall: string
+    try {
+      fall = readFileSync(new URL('../../Fall Calendar.csv', import.meta.url), 'utf8')
+    } catch {
+      return
+    }
+    const { events } = parseSprocketCsv(fall, { combineProgramIds: new Set(['14796']) })
+    const ap = events.filter((e) => e.rows[0].ProgramID === '14796')
+    expect(ap).toHaveLength(29)
+    expect(ap.reduce((n, e) => n + e.sprocketIds.length, 0)).toBe(62)
+    expect(events).toHaveLength(375 - 62 + 29)
+    expect(ap.map((e) => e.sessionName)).toContain('Athlete Q&A Video Session (Current Pro / Ex-Pro / D1 Athlete)')
+    expect(ap.map((e) => e.sessionName)).toContain('Annual Program / Junior Annual Program')
+  })
+})

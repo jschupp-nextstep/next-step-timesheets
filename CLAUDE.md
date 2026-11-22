@@ -189,7 +189,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
 | 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9 done 2026-10-14 (routine scheduler adds skip review; Luis's scheduler login deferred — Justin schedules AP himself for now) |
-| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 📝 Designed 2026-11-22, not built — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
+| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; step 1 (mappings, event fields, AP merge) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0032` (0032 not yet run as of 2026-11-22), applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0035` (0033–0035 written 2026-11-22, not yet run), applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -381,6 +381,40 @@ Justin's brief (2026-11-22): Justin, Nick and Luis build and maintain the schedu
 app produces a CSV that Sprocket imports; Sprocket becomes downstream. Payroll is unchanged —
 sessions created here are the same sessions coaches confirm hours against. Target 1/1/2027; finish
 timesheet go-live first, build in December. Order of work and cut list at the end.
+
+### Step 1 built (2026-11-22, `0033`–`0035`; run in order, **0035 together with the push**)
+- **`0033_sprocket_mappings`**: `sprocket_programs` (Sprocket ProgramID, name, `combine_teams`,
+  active — chose an active flag per program/season over the planned valid_from/valid_to: a new
+  season is a new Sprocket program ID anyway), `sprocket_teams` (TeamID, name, Sprocket program,
+  app `program_id`, `is_default` = gets a row on new sessions of that app program, active),
+  `locations.sprocket_location_id` (not unique — dated camp locations share one), `fields` +
+  `events.field_id`. Seeded from every imported event's raw rows. AP's program has
+  `combine_teams`; Younger / Older / Jr. Academy are AP's defaults (Goalkeepers isn't — it only
+  joins the video sessions). Read by anyone with a role, written by admins.
+- **`0034_event_sprocket_fields`**: `events.event_type` (practice/game/club/other; null = unknown,
+  export treats as practice), `opponent`, `away_game`, `uniform`, `is_private`, `arrival_minutes`
+  (not paid time). Backfilled from the first raw row. `deleted_at` and `event_series` moved to
+  steps 7 and 2.
+- **`0035_event_sprocket_rows`**: one row per Sprocket calendar row a session produces (team or
+  Club), with `club_calendar_event_id` (unique), raw `sprocket_row`, `state`
+  (new/linked/delete_pending/deleted), `last_uploaded_hash`, `last_batch_id`. A trigger on
+  `events.sprocket_rows` (insert, or `sprocket_sync_event` on re-import) keeps it in step, records
+  new programs/teams/location IDs/fields, and fills the 0034 fields **blanks only** — so the
+  importer needed no write-path changes.
+- **AP merge** (in 0035): fall AP sessions of a `combine_teams` program at the same date + start +
+  end + location became one session with all their rows — by slot, not title: at Rehoboth Jr.
+  Academy's row is titled "Junior Annual Program" beside "Annual Program", and a coach running both
+  is one session paid once. Name = distinct titles sorted (byte order) joined " / " (e.g. "Annual
+  Program / Junior Annual Program"); single AP sessions were renamed to their title the same way
+  (they had been named after the group). Only sessions with nothing attached are merged away; all
+  62 fall AP sessions had nothing (2026-11-22) → 29.
+- **Importer**: reads `combine_teams` programs and passes them to `parseSprocketCsv(text,
+  { combineProgramIds })`, which groups those programs' rows by slot the same way
+  (`combinedTitle()`; blank-location rows share one placeholder per program, else the video
+  sessions split per team). Tested against the real fall export (62 rows → 29 sessions).
+- **`/sprocket-mappings`** (admin, "Sprocket Mappings" tile under Schedule): programs (combine
+  switch, active), teams (app program, default, active, filter by program; shows each app
+  program's default teams), locations' Sprocket IDs (filter "missing"), fields. Saves on change.
 
 ### What already exists (as of 2026-11-22)
 - `events`: program, location, date, start/end, `session_name` (= Sprocket Title), notes,

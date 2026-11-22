@@ -11,6 +11,7 @@ export type SprocketRow = {
   EndDateTime: string
   LocationName: string
   ProgramName: string
+  ProgramID?: string
   TeamName: string
   IsCancelled: string
   ArrivalTime?: string
@@ -267,11 +268,27 @@ function parseDate(value: string): string | null {
   return parsed.isValid() ? parsed.format('YYYY-MM-DD') : null
 }
 
-export function parseSprocketCsv(csvText: string): ParseResult {
+// Distinct titles, sorted, joined -- the same rule 0035 used for the merged
+// fall AP sessions, so a re-import sees no name change.
+export const combinedTitle = (titles: string[]) =>
+  Array.from(new Set(titles.filter(Boolean))).sort().join(' / ')
+
+export type ParseOptions = {
+  // Sprocket programs whose teams share one session (Phase 9, 0033's
+  // sprocket_programs.combine_teams -- Annual Program): rows with the same
+  // title, date, time and location are one session with one row per team,
+  // not one session per team. Matches how 0035 merged the fall AP sessions,
+  // so a re-import finds the merged session by any of its row IDs.
+  combineProgramIds?: ReadonlySet<string>
+}
+
+export function parseSprocketCsv(csvText: string, options: ParseOptions = {}): ParseResult {
   const result = Papa.parse<SprocketRow>(csvText, { header: true, skipEmptyLines: true })
   const errors: string[] = result.errors.map((e) => `Row ${e.row}: ${e.message}`)
 
   const groups = new Map<string, ParsedEvent>()
+  // Every title seen in a combined session (titles may contain " / ").
+  const combinedTitles = new Map<string, string[]>()
 
   const skipped: SkippedRow[] = []
   const eventType = (row: SprocketRow) => row.ClubEventType?.trim().toLowerCase() ?? ''
@@ -314,17 +331,28 @@ export function parseSprocketCsv(csvText: string): ParseResult {
     const startTime = parseTime12h(row.StartDateTime)
     const endTime = parseTime12h(row.EndDateTime)
     const teamName = teamNameRaw
-    const locationName = row.LocationName?.trim() || (isStaffed ? '' : blankLocationLabel(teamName || base))
     const programName = row.ProgramName?.trim() ?? ''
+    const combined = !isStaffed && !!options.combineProgramIds?.has(row.ProgramID?.trim() ?? '')
+    // A combined program's blank-location rows share one placeholder (the
+    // program), not one per team -- else its video sessions split per team.
+    const locationName =
+      row.LocationName?.trim() || (isStaffed ? '' : blankLocationLabel(combined ? programName : teamName || base))
     const coachNames = isStaffed ? [] : [...titled.names, ...parseCoachNames(row.Notes)]
 
     // Staffed (Camp) rows collapse across staff members -- team name varies
     // per coach/role but represents the same event, so it's excluded from
     // the key. Unstaffed rows (e.g. Annual Program cohorts) keep team name
     // in the key, since each one is a genuinely distinct session.
-    const groupKey = isStaffed
-      ? [base, eventDate, startTime, endTime, locationName, programName].join('|')
-      : [base, eventDate, startTime, endTime, locationName, programName, teamName].join('|')
+    // Combined teams group by slot alone: at Rehoboth the Jr. Academy row is
+    // titled "Junior Annual Program" beside the others' "Annual Program" at the
+    // same time and place -- still one session (a coach running both is paid
+    // once). The name lists every title; each row keeps its own for export.
+    const groupKey = combined
+      ? ['combined', eventDate, startTime, endTime, locationName, programName].join('|')
+      : isStaffed
+        ? [base, eventDate, startTime, endTime, locationName, programName].join('|')
+        : [base, eventDate, startTime, endTime, locationName, programName, teamName].join('|')
+    const rowCancelled = row.IsCancelled?.trim().toLowerCase() === 'yes'
 
     let event = groups.get(groupKey)
     if (!event) {
@@ -336,16 +364,26 @@ export function parseSprocketCsv(csvText: string): ParseResult {
         eventDate,
         startTime,
         endTime,
-        sessionName: isStaffed ? base : type === 'game' ? base : teamName || base,
-        isCancelled: row.IsCancelled?.trim().toLowerCase() === 'yes',
+        sessionName: isStaffed || combined || type === 'game' ? base : teamName || base,
+        isCancelled: rowCancelled,
         assignedCoachNames: [],
         paidEarlyMinutes: gameWarmupMinutes(row),
         sprocketIds: [],
         rows: [],
-        teamName,
+        // A combined session's team-coach default is per program, not per
+        // group (its rows are several teams).
+        teamName: combined ? programName : teamName,
         needsTeamCoach: false,
       }
       groups.set(groupKey, event)
+      if (combined) combinedTitles.set(groupKey, [base])
+    } else if (combined) {
+      // Cancelled only if every team's row is.
+      event.isCancelled = event.isCancelled && rowCancelled
+      const titles = combinedTitles.get(groupKey) ?? []
+      titles.push(base)
+      event.sessionName = combinedTitle(titles)
+      event.title = event.sessionName
     }
     const sprocketId = row.ClubCalendarEventID?.trim()
     if (sprocketId && !event.sprocketIds.includes(sprocketId)) event.sprocketIds.push(sprocketId)

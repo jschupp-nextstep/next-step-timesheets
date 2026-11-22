@@ -237,7 +237,18 @@ export const SprocketImport = () => {
       message.error({ content: wrongFile, duration: 8 })
       return false
     }
-    const { events, errors, skipped } = parseSprocketCsv(text)
+    // Programs whose teams share one session per slot (AP -- 0033/0035).
+    const { data: combinePrograms, error: combineError } = await supabaseClient
+      .from('sprocket_programs')
+      .select('sprocket_program_id')
+      .eq('combine_teams', true)
+    if (combineError) {
+      message.error({ content: `Couldn't read the Sprocket mappings (${combineError.message}) -- has migration 0035 been run?`, duration: 8 })
+      return false
+    }
+    const { events, errors, skipped } = parseSprocketCsv(text, {
+      combineProgramIds: new Set((combinePrograms ?? []).map((p) => p.sprocket_program_id as string)),
+    })
     setParsed(events)
     setParseErrors(errors)
     setSkippedRows(skipped)
@@ -577,8 +588,9 @@ export const SprocketImport = () => {
       <Typography.Title level={3}>Import Sprocket Calendar</Typography.Title>
       <Typography.Paragraph type="secondary">
         Upload a Sprocket calendar export (CSV). Camp sessions with multiple staff rows are
-        collapsed into one event with their staff assignments recorded; everything else becomes
-        one event per row, with coaches read from Notes or a "Title — Coach" suffix. Re-uploading
+        collapsed into one event with their staff assignments recorded; Annual Program groups at the
+        same time and place are one session (set per program on Sprocket mappings); everything else
+        becomes one event per row, with coaches read from Notes or a "Title — Coach" suffix. Re-uploading
         a later export updates the sessions it already created (matched by Sprocket's event ID)
         instead of duplicating them.
       </Typography.Paragraph>

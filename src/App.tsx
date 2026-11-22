@@ -79,6 +79,9 @@ const Settings = lazy(() => import('./pages/settings').then((m) => ({ default: m
 const SprocketImport = lazy(() =>
   import('./pages/sprocket-import').then((m) => ({ default: m.SprocketImport })),
 )
+const SprocketMappings = lazy(() =>
+  import('./pages/sprocket-mappings').then((m) => ({ default: m.SprocketMappings })),
+)
 const BulkImport = lazy(() =>
   import('./pages/bulk-import').then((m) => ({ default: m.BulkImport })),
 )
@@ -181,6 +184,7 @@ const AdminRoutes = () => (
         <Route path="edit/:id" element={<EntryEdit />} />
       </Route>
       <Route path="/sprocket-import" element={<SprocketImport />} />
+      <Route path="/sprocket-mappings" element={<SprocketMappings />} />
       <Route path="/bulk-import" element={<BulkImport />} />
       <Route path="/reconciliation" element={<Reconciliation />} />
       <Route path="/payment-due" element={<PaymentDue />} />
@@ -409,6 +413,11 @@ function App() {
                   name: 'sprocket-import',
                   list: '/sprocket-import',
                   meta: { label: 'Import Calendar' },
+                },
+                {
+                  name: 'sprocket-mappings',
+                  list: '/sprocket-mappings',
+                  meta: { label: 'Sprocket Mappings' },
                 },
                 {
                   name: 'reconciliation',
