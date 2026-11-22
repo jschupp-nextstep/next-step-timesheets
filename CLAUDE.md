@@ -288,8 +288,13 @@ filter on Coaches, set on the forms and import, and the scheduling coach pickers
 Rate data cleanup done 2026-11-22 at Justin's direction (corrections in place — nothing had been
 paid in the app): Joselito Coaching $60, Valerie Coaching $35, Taron Camp/Set-up $25 + Office
 Hours $25 (Stipend line removed), Shay Camp/Set-up $45; Caleb stays $30 for Camp; added Patrick
-Pries, Bryce Nardizzi, Matheus Moreno; "Hayley K" → Hayley Katkowski; 10 coaches with no rates set
-inactive. Town Session has no separate rates (Coaching fallback). Pay-rate spreadsheets
+Pries, Bryce Nardizzi, Matheus Moreno; Taron Coaching $30; Taron's and Corven's hourly Stipend
+lines removed (stipends are flat amounts); "Hayley K" → Hayley Katkowski; 10 coaches with no rates
+set inactive. Weekly rates: Prince $1,100 Sat–Fri from 9/12/2026, Hayley $200 Mon–Sun from
+9/7/2026, both on Town Session. Schedulers: **Nick Woodruff** (`nwoodruff@`, every session-type
+program, all locations — one program rule per program, so a new program needs a rule added) and
+**Luis Silva** (`lsilva@`, Annual Program); both staff type Operations once 0032 runs, no hourly
+rate; Justin creates their Auth users. 2027 pay periods added (1/11/2027 … 12/27/2027–1/9/2028). Town Session has no separate rates (Coaching fallback). Pay-rate spreadsheets
 (`Pay Rates *.xlsx`) are gitignored.
 
 ### Before coach rollout (to-do)
@@ -307,7 +312,7 @@ coaches aren't actually logging in yet — the app's real use so far is admin-si
 - [x] **Pay periods created** 2026-10-13 (Justin's spec: two weeks, Monday–Sunday, first new one
   starting Mon 10/19): 10/5–10/18 (covers the 10/7 cutover), then 10/19–11/1 through
   12/28–1/10/2027. Before this the table was empty, so every date was Band C and no coach could log
-  or Confirm hours on a calendar session. **Add 2027 periods before 1/10/2027.**
+  or Confirm hours on a calendar session. 2027 periods added 2026-11-22 through 1/9/2028.
 - "Allow new users to sign up" is **off** in Supabase Auth (turned off 2026-10-12), so every login
   must be created deliberately: the script above, or Authentication → Users → Add user.
 
@@ -394,79 +399,85 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   Academy; all with 0 coaches on 2026-11-22). Assigning a coach to "the AP session" would mean three
   events → three Confirm hours → triple pay. Phase 9 fixes the model, not just the export.
 
-### Core idea: one app session, many Sprocket rows
-An `events` row stays the unit coaches are scheduled on and paid for. What it becomes in Sprocket
-is a separate list of **Sprocket rows** it produces, each with its own `ClubCalendarEventID`:
-- **Staff rows** (Town, AP staff, Camp): one per assigned coach, TeamName "<Coach> - Town" /
-  "<Coach> - Annual Program" / "<Coach> - Camp". Derived from `event_assignments`; a sub deletes
-  the old coach's row and adds the new one's.
-- **Group rows** (AP groups, DSA teams, Town teams like "Natick - Technical Training"): one per
-  chosen Sprocket team; coach name(s) generated into Title ("Annual Program — Keith + Caleb").
-- Each program has a `sprocket_row_pattern` (`staff` / `groups` / `both`) and default groups.
+### Decisions (Justin, 2026-11-22 — design approved with these changes)
+- **No per-coach staff teams.** Export the way fall 2026 works: **one row per Sprocket team per
+  session**, coach names in Notes as `Coaches: X/Y` — AP groups, DSA teams and named Town teams
+  alike. A sub only changes Notes on the existing row (an update by ID; no delete-and-add).
+- **Club rows are a third row type**: `ClubEventType = Club`, no ProgramID/TeamID (both futsal
+  series are saved this way). A Club session produces exactly one row, keyed by the session itself.
+- **AP split sessions** (Jr. Academy 6:30, others 7:30) are two app sessions; a coach on both is
+  paid for both. **The AP +15 min applies only to the first session of a back-to-back block for the
+  same coach at the same location**; the second pays from its scheduled start. (Today the +15 is a
+  flat per-program rule — this needs a "previous session for this coach ends when this one starts,
+  same location" check where paid time is computed: `paidWindow()` in `src/utils/hours.ts`, used by
+  Confirm hours, corrections, claim approval and the review-queue stale check.)
+- **Winter already in Sprocket** (`Winter Calendar.csv`, gitignored; export of 1/1 onward, 97
+  rows): DSA winter at Sluggers (ProgramID 20285, team IDs 101901/02/04/05/06/07/09, coaches in
+  Notes; Saturdays 1/9–3/13, none 1/16) — **the pattern for team rows**; futsal as Club rows at
+  Medway Middle School (LocationID 70435, Fridays 1/8–2/26, none 2/19, times vary by week — correct)
+  and Fore Kicks (66775, Saturdays 1/9–3/13). They already have ClubCalendarEventIDs: **import them
+  with IDs linked at the switch, never re-create** (would duplicate in Sprocket). Futsal has no
+  coaches yet; assigned in the app.
+- **AP winter** uses fall AP's programs/teams (mappings from the fall imports apply). If the export
+  is ready, Luis builds AP after 1/1 in the app; otherwise Justin adds it in Sprocket by 12/30 and
+  it's imported.
+- Justin runs the one-row Sprocket test (create / update by ID / cancel / delete) with
+  `sprocket-test/1-create.csv` … `4-delete.csv` (gitignored; a private Club row at Medway on
+  12/30/2026, "TEST - app export (delete me)"; steps 2–4 need the ID from a Sprocket export pasted
+  over `PASTE_ID_HERE`).
+
+### Core idea: one app session, one or more Sprocket rows
+An `events` row stays the unit coaches are scheduled on and paid for. It produces:
+- **Team rows** — one per chosen Sprocket team (AP: Younger / Older / Jr. Academy; DSA: one team;
+  Town: e.g. "Natick - Technical Training"), all sharing the session's time and location, Notes
+  `Coaches: X/Y` generated from `event_assignments`.
+- **or one Club row** (no team/program).
+Each program has default teams (AP → the three groups) so a new AP session gets its rows
+automatically; editable per session.
 
 ### Proposed migrations (each additive; follows the migration ↔ deploy rule)
-1. **`0033_sprocket_mappings`** — `sprocket_programs` (app program → Sprocket ProgramID/Name,
-   **with valid_from/valid_to**, since ProgramName carries the season, e.g. "Town Sessions
-   2026-2027", and winter may be a new Sprocket program); `sprocket_teams` (TeamID, TeamName,
-   ProgramID, kind `staff`/`group`, `coach_id` for staff teams); `locations.sprocket_location_id`;
-   new `fields` (location, name, `sprocket_field_id`) + `events.field_id`. Seeded automatically by
-   the importer from any export (the Fall/July files already contain ~60 TeamIDs). Admin screens to
-   fix/complete them; export refuses rows with a missing mapping and lists them.
+1. **`0033_sprocket_mappings`** — `sprocket_programs` (app program → Sprocket ProgramID/Name, with
+   valid_from/valid_to, since ProgramName carries the season); `sprocket_teams` (TeamID, TeamName,
+   ProgramID, app program, default-for-program flag); `locations.sprocket_location_id`; new
+   `fields` (location, name, `sprocket_field_id`) + `events.field_id`. Seeded by the importer from
+   any export (Fall/July/Winter files already hold the IDs). Export refuses rows with a missing
+   mapping and lists them.
 2. **`0034_event_sprocket_fields`** — on `events`: `event_type` (practice/game/club/other),
    `opponent`, `away_game`, `is_private`, `uniform`, `arrival_minutes` (separate from
-   `paid_early_minutes`; default per program), `deleted_at` (soft delete: an exported session must
-   still exist to send DeleteEvent). New `event_series` (weekdays[], start/end date, skip dates,
-   template fields) so a series can be regenerated/edited; events keep `series_id`.
-3. **`0035_event_sprocket_rows`** — `event_sprocket_rows` (event, kind, `sprocket_team_id`,
-   `coach_id` for staff rows, `club_calendar_event_id`, `last_uploaded_hash`, `state`
-   new/linked/changed/delete_pending/deleted, `last_batch_id`). Backfill from `sprocket_event_ids`
-   + `sprocket_rows` for every imported event. **AP merge**: collapse each AP triplet (same
-   date/time/location, one per group) into one event with three group rows — only where the extra
-   events have no entries/assignments/claims; anything else is listed, not merged.
-4. **`0036_sprocket_exports`** — `sprocket_export_batches` (who, when, mode, date range, program
-   filter, row count, the CSV text, `status` waiting_upload/uploaded/abandoned, confirmed by/at).
-   Functions: `sprocket_build_export(mode, from, to, programs)` (marks rows into a batch),
-   `sprocket_confirm_upload(batch)` (stamps `last_uploaded_hash`), `sprocket_link_ids(...)`.
-   Admins + schedulers (their programs) can export/confirm; RLS like `schedule_changes`.
-   Plus `app_settings.schedule_source_from` (date the app becomes the source).
+   `paid_early_minutes`; Town arrives 15 early but is paid from the start), `deleted_at` (soft
+   delete so an exported session can still send DeleteEvent). New `event_series` (weekdays[],
+   start/end, skip dates, template) for weekday series with skip dates.
+3. **`0035_event_sprocket_rows`** — (event, `sprocket_team_id` or null for Club,
+   `club_calendar_event_id`, `last_uploaded_hash`, state new/linked/delete_pending/deleted,
+   `last_batch_id`). Backfilled from `sprocket_event_ids` + `sprocket_rows`. **AP merge**: collapse
+   each fall AP triplet (same date/time/location, one per group) into one event with three team rows
+   — only where the extra events have no entries/assignments/claims; others are listed.
+4. **`0036_sprocket_exports`** — `sprocket_export_batches` (who, when, mode, range, programs, the
+   CSV, status waiting_upload/uploaded/abandoned, confirmed by/at); functions to build a batch,
+   confirm an upload (stamps `last_uploaded_hash`), and link IDs. Admins + schedulers (own
+   programs). `app_settings.schedule_source_from`.
 
 ### Export
-- Exact Sprocket column layout (ClubID … Draft, 40 columns, as in `Fall Calendar.csv`); constants
-  observed in every row so far: TimeZoneID 7, ShowTime Yes, IsStaffEvent No, Draft No.
-- **Modes:** "new and changed since last upload" (rows with no ID, or whose current content hash ≠
-  `last_uploaded_hash`, or deleted/cancelled since) and "full date range".
-- Changed rows carry their `ClubCalendarEventID` (update, not duplicate); cancelled →
-  `IsCancelled=Yes`; deleted session / removed coach → `DeleteEvent=Yes` + ID.
-- **Rows uploaded but not yet linked are frozen**: a new row (no ID) that was in a confirmed batch
-  is not re-exported — not even if changed — until "link IDs" gives it an ID. Otherwise a second
-  upload would create a duplicate in Sprocket.
-- A row already in someone's *waiting* batch shows a warning ("in Nick's batch from 12/3, not
-  confirmed") if it's exported again.
+- Exact 40-column layout (ClubID … Draft). Constants seen in every row: ClubID 371 "Next Step
+  Training", TimeZoneID 7, ShowTime Yes, IsStaffEvent No, Draft No.
+- Modes: "new and changed since last upload" (no ID, content hash ≠ `last_uploaded_hash`, or
+  cancelled/deleted since) and "full date range". Changed rows carry their ID; cancelled →
+  `IsCancelled=Yes`; deleted → `DeleteEvent=Yes`.
+- **Uploaded-but-unlinked rows are frozen** until "link IDs" gives them an ID, so a second upload
+  can't duplicate them. A row in someone's still-waiting batch warns if exported again.
 
 ### Link IDs and compare (importer modes)
-- **Link IDs**: after an upload, Justin exports from Sprocket; for each app row without an ID, match
-  by TeamID + date + start time + Title (exactly one candidate → save; else list for a manual pick).
-- **Compare** (after `schedule_source_from`): Sprocket differences — time, cancelled, rows missing
-  or extra (someone edited Sprocket directly) — are listed for review: "take Sprocket's" (a logged
-  admin change) or "ignore" (next export overwrites Sprocket). Never applied automatically.
-  Before that date the importer keeps today's sync behavior.
+- **Link IDs**: after an upload, export from Sprocket; match each app row without an ID by TeamID
+  (or Club + location) + date + start time + Title; exactly one candidate → save, else pick by hand.
+- **Compare** (after `schedule_source_from`): Sprocket-side differences listed for review — take
+  Sprocket's (logged admin change) or ignore (next export overwrites). Never automatic.
 
-### Questions / risks (open — ask Justin before building)
-- **Sprocket ID behavior must be tested first** with one throwaway row: import new → export to get
-  its ID → re-import with the ID and a changed time (updates, not duplicates?) → re-import with
-  `IsCancelled=Yes` → re-import with `DeleteEvent=Yes`. Also: can an update change TeamID (a sub),
-  or must it delete + add? Design assumes delete + add.
-- **Staff teams "<Coach> - Town" / "<Coach> - Annual Program" — do they exist in Sprocket?** The
-  fall export has none: fall Town rows are team-based ("Natick - Technical Training", coach in
-  Notes/Title), and only Camp has per-coach staff teams (July). New coaches need a staff team
-  created in Sprocket before their rows can export.
-- **AP:** always all three groups at the same time? On Wednesdays Jr. Academy is 6:30 and the
-  others 7:30 — two app sessions. If one coach covers both, they're paid for both hours (correct?).
-- The 25 fall **Club** rows duplicated team rows — export never produces Club rows unless a session
-  is `event_type = club`.
-- Season program IDs: who creates winter programs/teams in Sprocket, and when (needed before export).
-- Deleting in the app is a hard delete today (admin Events); becomes soft once a session has been
-  exported.
+### Open questions / risks
+- The Sprocket one-row test decides whether update/cancel/delete by ID work as assumed.
+- Who creates new Sprocket programs/teams for new seasons, and when (needed before export).
+- Weekly rates are per program, not per location: Prince's $1,100 and Hayley's $200 are set on
+  **Town Session**, so any other Town Session they work is covered by the week too. Fine while
+  Dedham/Quincy is their only Town work; a location-scoped weekly rate would need a migration.
 
 ### Size, 1/1 realism, cut list
 Rough build size: mappings + fields + seeding (~2 days), session create/series/AP merge (~2–3),

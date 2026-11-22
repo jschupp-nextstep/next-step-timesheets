@@ -43,3 +43,5 @@ scripts/generate_real_data_import.py
 # Local input files -- read as input, never committed
 Master Calendar.xlsx
 Pay Rates *.xlsx
+Winter Calendar.csv
+sprocket-test/
