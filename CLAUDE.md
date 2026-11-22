@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0035` (0033–0035 written 2026-11-22, not yet run), applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0035`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -382,7 +382,7 @@ app produces a CSV that Sprocket imports; Sprocket becomes downstream. Payroll i
 sessions created here are the same sessions coaches confirm hours against. Target 1/1/2027; finish
 timesheet go-live first, build in December. Order of work and cut list at the end.
 
-### Step 1 built (2026-11-22, `0033`–`0035`; run in order, **0035 together with the push**)
+### Step 1 built (2026-11-22, `0033`–`0035`, run and deployed 2026-11-22)
 - **`0033_sprocket_mappings`**: `sprocket_programs` (Sprocket ProgramID, name, `combine_teams`,
   active — chose an active flag per program/season over the planned valid_from/valid_to: a new
   season is a new Sprocket program ID anyway), `sprocket_teams` (TeamID, name, Sprocket program,
@@ -412,6 +412,11 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   { combineProgramIds })`, which groups those programs' rows by slot the same way
   (`combinedTitle()`; blank-location rows share one placeholder per program, else the video
   sessions split per team). Tested against the real fall export (62 rows → 29 sessions).
+- Verified after running: 4 Sprocket programs (AP combined), 72 teams, 3 AP defaults, 375
+  `event_sprocket_rows` all linked, 342 imported sessions (29 AP holding the 62 AP rows), every
+  session's row count = its ID count; 317 practice / 25 game. Only 4 locations have a Sprocket ID —
+  correct: the fall import used 4 real locations, everything else (mostly away games) is at
+  Location TBD. Winter's Sluggers / Medway Middle / Fore Kicks fill in on the winter import.
 - **`/sprocket-mappings`** (admin, "Sprocket Mappings" tile under Schedule): programs (combine
   switch, active), teams (app program, default, active, filter by program; shows each app
   program's default teams), locations' Sprocket IDs (filter "missing"), fields. Saves on change.
