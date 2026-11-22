@@ -75,6 +75,12 @@ const SECTIONS: TileSection[] = [
         icon: <CloudUploadOutlined />,
       },
       {
+        to: '/sprocket-export',
+        title: 'Export to Sprocket',
+        description: "Download the sessions made here that aren't in Sprocket yet, ready for Sprocket's calendar import.",
+        icon: <ExportOutlined />,
+      },
+      {
         to: '/sprocket-mappings',
         title: 'Sprocket Mappings',
         description: "Sprocket's IDs for programs, teams, locations and fields, and which teams a new session gets.",

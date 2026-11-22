@@ -189,7 +189,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
 | 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9 done 2026-10-14 (routine scheduler adds skip review; Luis's scheduler login deferred — Justin schedules AP himself for now) |
-| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; steps 1 (mappings, event fields, AP merge) and 2 (session series) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
+| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; steps 1 (mappings, event fields, AP merge), 2 (session series) and 3 (export of new rows) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -448,6 +448,29 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   reviewed / Scheduled"; a Club futsal session → one Club row; end before start refused. On screen,
   picking AP filled the three teams, Weekly ticked Saturday, and 1/9–3/13 previewed 10 Saturdays.
   Test sessions deleted; their one `event_series` row remains (no API delete; harmless).
+
+### Step 3 built (2026-11-22, no migration)
+- **`/sprocket-export`** (admin, "Export to Sprocket" tile under Schedule): date range + optional
+  programs → every `event_sprocket_rows` row in state `new` (made here, not in Sprocket) as a CSV in
+  the exact 40-column layout (`SPROCKET_COLUMNS`, `buildNewRows()` in
+  `src/utility/sprocketExport.ts`, tested). One row per team, one per Club session; Notes =
+  `Coaches: Full Name/Full Name` (sorted; `parseCoachNames` now strips the `Coaches:` label so it
+  reads back — round-trip tested). Constants: ClubID 371, Next Step Training, TimeZoneID 7,
+  ShowTime Yes, Draft No, IsStaffEvent No. Games: Title blank (Sprocket composes "Team vs
+  Opponent"), Opponent/AwayGame set. ArrivalTime = start − `arrival_minutes`. RSVP columns copied
+  from the team's own linked Sprocket rows (DSSC collects staff RSVPs), Club rows' for Club, else
+  Yes/No.
+- A session is all-or-nothing and listed under "Can't export yet" with the reason: location with
+  no Sprocket ID, no start/end time, field with no Sprocket ID, team without a Sprocket program, no
+  team rows. A new session that's already cancelled is skipped (nothing to send).
+- **Nothing is recorded about the download yet** (that's step 6, batches + confirm upload) — the
+  page warns to upload once; exporting the same range again before step 4 links the IDs would
+  create duplicates in Sprocket.
+- Verified 2026-11-22 with temporary sessions: a 2-date AP series with a coach → 6 rows (3 groups
+  × 2) with `Coaches: Taron Mills`; a Club session at Location TBD listed as can't-export (no
+  Sprocket ID); existing rows in range excluded. Test sessions deleted.
+- **Not yet checked against Sprocket itself** — waits on Justin's one-row test
+  (`sprocket-test/`).
 
 ### What already exists (as of 2026-11-22)
 - `events`: program, location, date, start/end, `session_name` (= Sprocket Title), notes,

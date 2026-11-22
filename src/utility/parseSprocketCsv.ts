@@ -223,7 +223,8 @@ function extractCoachName(teamName: string): string {
 // name it kept.
 export function parseCoachNames(text: string | undefined): string[] {
   if (!text) return []
-  const cleaned = text.replace(/\([^)]*\)/g, ' ')
+  // "Coaches: X/Y" is how the app's own export writes them (Phase 9).
+  const cleaned = text.replace(/^\s*coach(es)?\s*:\s*/i, '').replace(/\([^)]*\)/g, ' ')
   const names: string[] = []
   for (const part of cleaned.split(/\s*(?:\+|&|\/|,|;|\band\b)\s*/i)) {
     const name = part.replace(/\s+/g, ' ').trim().replace(/[.:]$/, '')
