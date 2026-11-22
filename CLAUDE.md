@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0036` (0036 written 2026-11-22, not yet run), applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0036`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -421,7 +421,7 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   switch, active), teams (app program, default, active, filter by program; shows each app
   program's default teams), locations' Sprocket IDs (filter "missing"), fields. Saves on change.
 
-### Step 2 built (2026-11-22, `0036_session_series.sql`; run before pushing)
+### Step 2 built (2026-11-22, `0036_session_series.sql`, run and deployed 2026-11-22)
 - **`schedule_create_sessions(program, location, dates[], start, end, name, coaches[], reason,
   details jsonb)`** — one session or a series in one transaction, for **admins and schedulers**
   (Justin, 2026-11-22: schedulers may create whole series; same rule as `schedule_create_event` —
@@ -443,6 +443,11 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   DSA winter = 9 Saturdays, Medway futsal = 7 Fridays). The old admin "weekly for N weeks" path
   (direct inserts, no history) is gone.
 - Admin **Edit Event** gained type, opponent, away, uniform, arrival, field, private.
+- Verified live 2026-11-22: a 2-date AP series (admin, blank reason) → 2 sessions with the three AP
+  default team rows (state new), arrival 15, series record with skip date, history "create /
+  reviewed / Scheduled"; a Club futsal session → one Club row; end before start refused. On screen,
+  picking AP filled the three teams, Weekly ticked Saturday, and 1/9–3/13 previewed 10 Saturdays.
+  Test sessions deleted; their one `event_series` row remains (no API delete; harmless).
 
 ### What already exists (as of 2026-11-22)
 - `events`: program, location, date, start/end, `session_name` (= Sprocket Title), notes,
