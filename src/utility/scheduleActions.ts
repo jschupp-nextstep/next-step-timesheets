@@ -14,6 +14,7 @@ export type ScheduleFunction =
   | 'schedule_change_time'
   | 'schedule_set_cancelled'
   | 'schedule_create_event'
+  | 'schedule_create_sessions'
   | 'schedule_mark_reviewed'
   | 'schedule_reverse'
   | 'schedule_cancel_day'

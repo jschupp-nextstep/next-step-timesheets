@@ -1,6 +1,6 @@
 import type { BaseRecord, GetOneResponse } from '@refinedev/core'
 import { Edit, useForm, useSelect } from '@refinedev/antd'
-import { DatePicker, Form, Input, InputNumber, Select, Switch, TimePicker } from 'antd'
+import { DatePicker, Form, Input, InputNumber, Radio, Select, Space, Switch, TimePicker } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 
 type EventFormValues = {
@@ -13,6 +13,11 @@ type EventFormValues = {
   notes: string | null
   is_cancelled: boolean
   paid_early_minutes: number | null
+  event_type: string | null
+  opponent: string | null
+  arrival_minutes: number | null
+  field_id: string | null
+  uniform: string | null
 }
 
 // Defined once, outside the component: an inline `select` is re-run by
@@ -43,6 +48,15 @@ export const EventEdit = () => {
     optionLabel: 'name',
     optionValue: 'id',
   })
+  // Phase 9 (0033): fields at the event's location.
+  const locationId = Form.useWatch('location_id', formProps.form)
+  const { selectProps: fieldSelectProps } = useSelect({
+    resource: 'fields',
+    optionLabel: 'name',
+    optionValue: 'id',
+    filters: [{ field: 'location_id', operator: 'eq', value: locationId ?? null }],
+    queryOptions: { enabled: !!locationId },
+  })
 
   return (
     <Edit saveButtonProps={saveButtonProps}>
@@ -57,6 +71,10 @@ export const EventEdit = () => {
             start_time: values.start_time?.format('HH:mm:ss') ?? null,
             end_time: values.end_time?.format('HH:mm:ss') ?? null,
             paid_early_minutes: values.paid_early_minutes ?? null,
+            arrival_minutes: values.arrival_minutes ?? null,
+            field_id: values.field_id ?? null,
+            opponent: values.opponent || null,
+            uniform: values.uniform || null,
           })
         }}
       >
@@ -82,6 +100,43 @@ export const EventEdit = () => {
         >
           <InputNumber min={0} max={180} step={5} style={{ width: '100%' }} addonAfter="min" />
         </Form.Item>
+        <Form.Item label="Type" name="event_type" extra="Sprocket's event type. Blank = not set (treated as Practice).">
+          <Radio.Group
+            optionType="button"
+            options={[
+              { label: 'Practice', value: 'practice' },
+              { label: 'Game', value: 'game' },
+              { label: 'Club', value: 'club' },
+              { label: 'Other', value: 'other' },
+            ]}
+          />
+        </Form.Item>
+        <Space wrap align="start">
+          <Form.Item label="Opponent (games)" name="opponent">
+            <Input style={{ width: 220 }} />
+          </Form.Item>
+          <Form.Item label="Away game" name="away_game" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item label="Uniform" name="uniform">
+            <Input style={{ width: 140 }} />
+          </Form.Item>
+          <Form.Item
+            label="Arrive (min before start)"
+            name="arrival_minutes"
+            extra="For Sprocket. Not paid time -- that's the field above."
+          >
+            <InputNumber min={1} max={240} step={5} style={{ width: 160 }} />
+          </Form.Item>
+        </Space>
+        <Space wrap align="start">
+          <Form.Item label="Field" name="field_id">
+            <Select {...fieldSelectProps} allowClear placeholder="Any field" style={{ width: 240 }} />
+          </Form.Item>
+          <Form.Item label="Private in Sprocket" name="is_private" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Space>
         <Form.Item label="Session / Team Name" name="session_name">
           <Input />
         </Form.Item>

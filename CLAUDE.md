@@ -189,7 +189,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
 | 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9 done 2026-10-14 (routine scheduler adds skip review; Luis's scheduler login deferred — Justin schedules AP himself for now) |
-| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; step 1 (mappings, event fields, AP merge) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
+| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; steps 1 (mappings, event fields, AP merge) and 2 (session series) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0035`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0036` (0036 written 2026-11-22, not yet run), applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -420,6 +420,29 @@ timesheet go-live first, build in December. Order of work and cut list at the en
 - **`/sprocket-mappings`** (admin, "Sprocket Mappings" tile under Schedule): programs (combine
   switch, active), teams (app program, default, active, filter by program; shows each app
   program's default teams), locations' Sprocket IDs (filter "missing"), fields. Saves on change.
+
+### Step 2 built (2026-11-22, `0036_session_series.sql`; run before pushing)
+- **`schedule_create_sessions(program, location, dates[], start, end, name, coaches[], reason,
+  details jsonb)`** — one session or a series in one transaction, for **admins and schedulers**
+  (Justin, 2026-11-22: schedulers may create whole series; same rule as `schedule_create_event` —
+  a program/location rule). Max 150 at once. Details: `event_type` (default practice),
+  opponent/away/uniform (games), `is_private`, `arrival_minutes` (a **game** also gets
+  `paid_early_minutes` = arrival, R3), `field_id` (must be at the location), notes, `team_ids`
+  (absent = the program's default Sprocket teams; ignored for Club, which gets one Club row) →
+  `event_sprocket_rows` in state `new`. Logged per session (create + adds); a scheduler's go to
+  review (the queue's top-level "Mark all reviewed" clears a series). Admin reason optional
+  ("Scheduled").
+- **`event_series`**: the rule (weekdays, first/last date, skip dates, times) for series made this
+  way; `events.series_id` points at it. Older `series_id` values have no row.
+- **`SessionForm`** (`src/components/SessionForm.tsx`) — admin Create Event (`/events/create`) and
+  the scheduler's New session dialog both use it: program, location, field, type, opponent/away,
+  name, date, repeat weekly on chosen days until a date, skip dates (multi-date picker), times,
+  arrival, Sprocket teams (pre-filled with the program's defaults), coaches, private, notes, reason
+  (required for schedulers), and a preview listing every date (plus skip dates that weren't going
+  to be sessions anyway). Dates come from `seriesDates()` (`src/utility/sessionSeries.ts`, tested:
+  DSA winter = 9 Saturdays, Medway futsal = 7 Fridays). The old admin "weekly for N weeks" path
+  (direct inserts, no history) is gone.
+- Admin **Edit Event** gained type, opponent, away, uniform, arrival, field, private.
 
 ### What already exists (as of 2026-11-22)
 - `events`: program, location, date, start/end, `session_name` (= Sprocket Title), notes,

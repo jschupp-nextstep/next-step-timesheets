@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useList } from '@refinedev/core'
-import { DatePicker, Form, Input, Modal, Select, Space, TimePicker } from 'antd'
-import type { Dayjs } from 'dayjs'
+import { Modal } from 'antd'
 
-import { useScheduleAction } from '../../utility/scheduleActions'
+import { SessionForm } from '../../components/SessionForm'
 import { creatableOptions, type CreateScopeRow, type IdName } from '../../utility/schedulerScopes'
 
+// A scheduler's "New session": one session or a weekly series, limited to
+// the programs/locations their rules allow (schedule_create_sessions checks
+// again and its refusal is shown).
 export const NewSessionModal = ({
   open,
   scopes,
@@ -17,16 +19,6 @@ export const NewSessionModal = ({
   onClose: () => void
   onCreated: () => void
 }) => {
-  const { run, running } = useScheduleAction()
-  const [programId, setProgramId] = useState<string | undefined>()
-  const [locationId, setLocationId] = useState<string | undefined>()
-  const [date, setDate] = useState<Dayjs | null>(null)
-  const [start, setStart] = useState<Dayjs | null>(null)
-  const [end, setEnd] = useState<Dayjs | null>(null)
-  const [sessionName, setSessionName] = useState('')
-  const [coachIds, setCoachIds] = useState<string[]>([])
-  const [reason, setReason] = useState('')
-
   const { result: programsResult } = useList<IdName>({
     resource: 'programs',
     filters: [
@@ -42,110 +34,19 @@ export const NewSessionModal = ({
     sorters: [{ field: 'name', order: 'asc' }],
     pagination: { pageSize: 300 },
   })
-  const { result: directoryResult } = useList<IdName & { is_active: boolean }>({
-    resource: 'coach_directory',
-    filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'name', order: 'asc' }],
-    pagination: { pageSize: 500 },
-  })
-
-  const { programOptions, locationOptions } = useMemo(
-    () => creatableOptions(scopes, programsResult?.data ?? [], locationsResult?.data ?? [], programId),
-    [scopes, programsResult?.data, locationsResult?.data, programId],
-  )
-
-  const reset = () => {
-    setProgramId(undefined)
-    setLocationId(undefined)
-    setDate(null)
-    setStart(null)
-    setEnd(null)
-    setSessionName('')
-    setCoachIds([])
-    setReason('')
-  }
-
-  const submit = async () => {
-    const ok = await run(
-      'schedule_create_event',
-      {
-        p_program_id: programId,
-        p_location_id: locationId,
-        p_event_date: date?.format('YYYY-MM-DD') ?? null,
-        p_start: start?.format('HH:mm:ss') ?? null,
-        p_end: end?.format('HH:mm:ss') ?? null,
-        p_session_name: sessionName,
-        p_coach_ids: coachIds,
-        p_reason: reason,
-      },
-      'Session created',
-    )
-    if (ok) {
-      reset()
-      onCreated()
-    }
-  }
+  const programs = useMemo(() => programsResult?.data ?? [], [programsResult?.data])
+  const locations = useMemo(() => locationsResult?.data ?? [], [locationsResult?.data])
+  const { programOptions } = useMemo(() => creatableOptions(scopes, programs, locations), [scopes, programs, locations])
 
   return (
-    <Modal
-      open={open}
-      title="New session"
-      okText="Create session"
-      okButtonProps={{ disabled: !programId || !locationId || !date || !reason.trim(), loading: running }}
-      onOk={submit}
-      onCancel={onClose}
-    >
-      <Form layout="vertical">
-        <Form.Item label="Program" required>
-          <Select
-            value={programId}
-            onChange={(v) => {
-              setProgramId(v)
-              setLocationId(undefined)
-            }}
-            options={programOptions.map((p) => ({ label: p.name, value: p.id }))}
-            placeholder="Program"
-          />
-        </Form.Item>
-        <Form.Item label="Location" required>
-          <Select
-            value={locationId}
-            onChange={setLocationId}
-            disabled={!programId}
-            showSearch
-            optionFilterProp="label"
-            options={locationOptions.map((l) => ({ label: l.name, value: l.id }))}
-            placeholder="Location"
-          />
-        </Form.Item>
-        <Form.Item label="Date" required>
-          <DatePicker style={{ width: '100%' }} value={date} onChange={setDate} />
-        </Form.Item>
-        <Space wrap>
-          <Form.Item label="Start">
-            <TimePicker format="h:mm A" minuteStep={5} use12Hours value={start} onChange={setStart} />
-          </Form.Item>
-          <Form.Item label="End">
-            <TimePicker format="h:mm A" minuteStep={5} use12Hours value={end} onChange={setEnd} />
-          </Form.Item>
-        </Space>
-        <Form.Item label="Session name (optional)">
-          <Input value={sessionName} onChange={(e) => setSessionName(e.target.value)} />
-        </Form.Item>
-        <Form.Item label="Coaches (optional)">
-          <Select
-            mode="multiple"
-            showSearch
-            optionFilterProp="label"
-            value={coachIds}
-            onChange={setCoachIds}
-            options={(directoryResult?.data ?? []).map((c) => ({ label: c.name, value: c.id }))}
-          />
-        </Form.Item>
-        <Form.Item label="Reason" required extra="Why this extra session exists -- shown to payroll on review.">
-          <Input.TextArea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
-        </Form.Item>
-      </Form>
+    <Modal open={open} title="New session" footer={null} onCancel={onClose} width={640} destroyOnHidden>
+      <SessionForm
+        role="scheduler"
+        programs={programOptions}
+        locationsFor={(programId) => creatableOptions(scopes, programs, locations, programId).locationOptions}
+        onCreated={onCreated}
+        onCancel={onClose}
+      />
     </Modal>
   )
 }
