@@ -284,7 +284,7 @@ roster — pick, add, or leave out — unknown programs, conflicting rates; chan
 correction or from a date). Logic in `src/utility/coachRateImport.ts` (tested). **Staff type**
 (`coaches.staff_type` coach/nurse/operations, `0032_staff_type.sql`, also on `coach_directory`):
 filter on Coaches, set on the forms and import, and the scheduling coach pickers group by it
-(`staffPickerOptions`). **0032 must be run before that commit is pushed** (the forms write it).
+(`staffPickerOptions`). 0032 run 2026-11-22.
 Rate data cleanup done 2026-11-22 at Justin's direction (corrections in place — nothing had been
 paid in the app): Joselito Coaching $60, Valerie Coaching $35, Taron Camp/Set-up $25 + Office
 Hours $25 (Stipend line removed), Shay Camp/Set-up $45; Caleb stays $30 for Camp; added Patrick
@@ -293,7 +293,7 @@ lines removed (stipends are flat amounts); "Hayley K" → Hayley Katkowski; 10 c
 set inactive. Weekly rates: Prince $1,100 Sat–Fri from 9/12/2026, Hayley $200 Mon–Sun from
 9/7/2026, both on Town Session. Schedulers: **Nick Woodruff** (`nwoodruff@`, every session-type
 program, all locations — one program rule per program, so a new program needs a rule added) and
-**Luis Silva** (`lsilva@`, Annual Program); both staff type Operations once 0032 runs, no hourly
+**Luis Silva** (`lsilva@`, Annual Program); both staff type Operations, no hourly
 rate; Justin creates their Auth users. 2027 pay periods added (1/11/2027 … 12/27/2027–1/9/2028). Town Session has no separate rates (Coaching fallback). Pay-rate spreadsheets
 (`Pay Rates *.xlsx`) are gitignored.
 
