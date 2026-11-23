@@ -961,7 +961,7 @@ export const SprocketImport = () => {
                 )}
                 <li>{summary.eventsUnchanged} previously imported events unchanged</li>
                 <li>{summary.eventsSkippedExisting} events already existed, skipped</li>
-                <li>{summary.eventsSkippedUnresolved} events skipped (program or location left for later)</li>
+                <li>{summary.eventsSkippedUnresolved} events skipped (see "Skipped events" below for why)</li>
                 <li>{summary.eventsSkippedIgnored} events intentionally not imported (marked "don't import")</li>
                 <li>{summary.assignmentsCreated} staff assignments created</li>
                 <li>{summary.assignmentsSkippedUnmatched} assignments skipped (unmatched coach)</li>

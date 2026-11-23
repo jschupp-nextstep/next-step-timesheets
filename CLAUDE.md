@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0037` (0037 written 2026-11-22, not yet run), applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0037`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -472,7 +472,7 @@ timesheet go-live first, build in December. Order of work and cut list at the en
 - **Not yet checked against Sprocket itself** — waits on Justin's one-row test
   (`sprocket-test/`).
 
-### Step 4 built (2026-11-22, `0037_link_sprocket_ids.sql`; run BEFORE pushing — the importer reads `app_managed`)
+### Step 4 built (2026-11-22, `0037_link_sprocket_ids.sql`, run and deployed 2026-11-22)
 - **`/sprocket-link`** ("Link Sprocket IDs"): upload a Sprocket calendar export after uploading an
   Export to Sprocket file. `planLinks()` (`src/utility/sprocketLink.ts`, tested) matches each
   Sprocket row whose ID the app doesn't know to an app row in state `new` by **team (or, for Club,
@@ -487,6 +487,11 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   Sprocket row that matches an unlinked app row is **not** created (skipped: "link its IDs first",
   with a warning before import) — so uploading the export and then importing Sprocket's calendar
   can't duplicate. Regular locations now auto-map by `sprocket_location_id`.
+- Verified 2026-11-22 with a temporary AP session: its export rows given made-up Sprocket IDs and
+  uploaded on Link Sprocket IDs → 3 matched automatically, linked (state linked, event
+  `app_managed`, IDs on the event); the same file again → "3 already linked". Import Calendar with
+  that file plus a second, unlinked session's rows → warning before import, then 0 created, 1 "made
+  in this app, left as they are", 1 skipped "link its IDs first". Test sessions deleted.
 - 0037 also adds the winter locations: Sluggers Academy (66190), Medway Middle School (70435),
   Fore Kicks Sports Complex and Golf Course (66775).
 - **Winter import at the switch** needs nothing new: Import Calendar with `Winter Calendar.csv`
