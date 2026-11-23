@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0038` (0038 written 2026-11-22, not yet run), applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0038`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -498,7 +498,7 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   creates DSA and futsal with their Sprocket IDs linked (the normal import path). Map the blank
   program (futsal Club rows) to Futsal; DSA teams → Town Session as in fall.
 
-### Step 5 built (2026-11-22, `0038_sprocket_changes.sql`; run BEFORE pushing — Settings saves the new column)
+### Step 5 built (2026-11-22, `0038_sprocket_changes.sql`, run and deployed 2026-11-22)
 - **`app_settings.schedule_source_from`** (Settings → "Schedule kept in this app from"): the switch.
   Sessions dated on/after it are scheduled here and any change to them is exported; before it /
   while blank, only `app_managed` sessions. Set it at the switch (target 1/1/2027).
@@ -517,6 +517,10 @@ timesheet go-live first, build in December. Order of work and cut list at the en
 - Deletes are still by hand in Sprocket (step 7).
 - **Checked against real data 2026-11-22**: with a pretend switch date before fall, all 342 imported
   sessions / 375 rows came out unchanged (0 spurious updates).
+- Verified 2026-11-22 with a temporary app session (linked with made-up IDs, then moved 6:00 → 6:30):
+  Export listed 3 changed rows tagged start/end with before/after, imported sessions excluded before
+  the switch; "I've uploaded this file" → "Recorded 3"; re-check → nothing to send, 3 unchanged.
+  Deleted afterward.
 - Assumes Sprocket updates by ClubCalendarEventID — **unconfirmed until Justin's one-row test**.
 
 ### What already exists (as of 2026-11-22)
