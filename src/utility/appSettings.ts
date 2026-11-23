@@ -5,6 +5,8 @@ export type AppSettings = {
   id: number
   cutover_date: string | null
   paid_through_date: string | null
+  // Phase 9 (0038): sessions from this date are scheduled in the app.
+  schedule_source_from: string | null
 }
 
 export function useAppSettings() {

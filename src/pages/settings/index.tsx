@@ -6,6 +6,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 type SettingsFormValues = {
   cutover_date: Dayjs | null
   paid_through_date: Dayjs | null
+  schedule_source_from: Dayjs | null
 }
 
 // Defined once, outside the component: an inline `select` is re-run by
@@ -17,6 +18,7 @@ const toFormValues = (data: GetOneResponse<BaseRecord>) => ({
     ...data.data,
     cutover_date: data.data.cutover_date ? dayjs(data.data.cutover_date) : null,
     paid_through_date: data.data.paid_through_date ? dayjs(data.data.paid_through_date) : null,
+    schedule_source_from: data.data.schedule_source_from ? dayjs(data.data.schedule_source_from) : null,
   },
 })
 
@@ -47,6 +49,7 @@ export const Settings = () => {
           formProps.onFinish?.({
             cutover_date: values.cutover_date?.format('YYYY-MM-DD') ?? null,
             paid_through_date: values.paid_through_date?.format('YYYY-MM-DD') ?? null,
+            schedule_source_from: values.schedule_source_from?.format('YYYY-MM-DD') ?? null,
             updated_at: new Date().toISOString(),
           })
         }}
@@ -62,6 +65,13 @@ export const Settings = () => {
           label="Paid through"
           name="paid_through_date"
           extra="Payment Due opens on the day after this. It moves forward on its own once every entry in a payroll range is marked paid -- only change it to correct a mistake."
+        >
+          <DatePicker style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item
+          label="Schedule kept in this app from"
+          name="schedule_source_from"
+          extra="The switch to the app as the schedule's source (Phase 9). Sessions on or after this date are scheduled here, and Export to Sprocket sends any change to them. Leave blank until the switch -- until then only sessions made here are exported."
         >
           <DatePicker style={{ width: '100%' }} />
         </Form.Item>

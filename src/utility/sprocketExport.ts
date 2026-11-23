@@ -57,6 +57,9 @@ export type ExportRowRef = {
   club_calendar_event_id: string | null
   sprocket_team_id: string | null
   team: { name: string; sprocket_program_id: string | null; programName: string | null } | null
+  // What Sprocket has for a linked row (from the last import, link, or
+  // recorded upload).
+  sprocketRow?: Record<string, string> | null
 }
 
 export type ExportSession = {
@@ -77,6 +80,11 @@ export type ExportSession = {
   field: { name: string; sprocket_field_id: string | null } | null
   coachNames: string[]
   rows: ExportRowRef[]
+  // Step 5 (changes). Made in this app and linked (0037).
+  appManaged?: boolean
+  coachIds?: string[]
+  // Coaches as of the last Sprocket import (sprocket_snapshot.coach_ids).
+  snapshotCoachIds?: string[] | null
 }
 
 // RSVP settings aren't kept on sessions here; they're copied from the team's
@@ -208,6 +216,133 @@ export function buildNewRows(
         Draft: 'No',
       })
       result.rowIds.push(r.id)
+    }
+  }
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Step 5: changes to rows already in Sprocket.
+//
+// Starts from the row as Sprocket has it and overlays only what the app
+// decides: date and times, cancelled, location and field (when they have
+// Sprocket IDs), arrival, private, opponent/away (games), coaches in Notes,
+// and -- for sessions made here -- the title. Sprocket-side wording on
+// imported sessions (their titles, "Max + Taron" notes) is kept unless the
+// app changed that thing.
+
+// Fields compared to decide whether a row changed, with how they're named
+// to a person.
+const COMPARED: [keyof SprocketCsvRow, string][] = [
+  ['StartDate', 'date'],
+  ['StartDateTime', 'start'],
+  ['EndDateTime', 'end'],
+  ['IsCancelled', 'cancelled'],
+  ['LocationID', 'location'],
+  ['FieldID', 'field'],
+  ['ArrivalTime', 'arrival'],
+  ['IsPrivate', 'private'],
+  ['Opponent', 'opponent'],
+  ['AwayGame', 'away'],
+  ['Notes', 'coaches'],
+  ['Title', 'title'],
+]
+
+const norm = (v: string | undefined) => {
+  const t = (v ?? '').trim()
+  return /^(yes|no)$/i.test(t) ? t.toLowerCase() : t
+}
+
+export type RowChange = { rowId: string; sessionId: string; label: string; team: string; fields: string[]; before: string; after: string }
+
+export type ChangedResult = {
+  csvRows: SprocketCsvRow[]
+  rowIds: string[]
+  changes: RowChange[]
+  problems: ExportProblem[]
+  // Linked rows checked and found the same as Sprocket's.
+  unchanged: number
+  // Linked rows on sessions Sprocket still schedules (before the switch).
+  notYours: number
+}
+
+const sameSet = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join() === [...b].sort().join()
+
+// The row to send for one linked row, or null if the session's data can't
+// be expressed yet (reason in `problem`).
+export function desiredLinkedRow(s: ExportSession, r: ExportRowRef): { row: SprocketCsvRow; problem: string | null } {
+  const base = Object.fromEntries(SPROCKET_COLUMNS.map((c) => [c, (r.sprocketRow?.[c] ?? '').toString()])) as SprocketCsvRow
+  const row: SprocketCsvRow = { ...base, ClubCalendarEventID: r.club_calendar_event_id ?? base.ClubCalendarEventID, DeleteEvent: '', SavedBy: '', SavedOn: '' }
+  let problem: string | null = null
+
+  row.StartDate = sprocketDate(s.event_date)
+  row.EndDate = sprocketDate(s.event_date)
+  if (s.start_time && s.end_time) {
+    row.StartDateTime = sprocketTime(s.start_time)
+    row.EndDateTime = sprocketTime(s.end_time)
+  } else problem = 'No start/end time'
+  row.IsCancelled = yesNo(s.is_cancelled)
+  if (s.location.sprocket_location_id) {
+    if (s.location.sprocket_location_id !== base.LocationID) {
+      row.LocationID = s.location.sprocket_location_id
+      row.LocationName = s.location.name
+    }
+  }
+  if (s.field?.sprocket_field_id && s.field.sprocket_field_id !== base.FieldID) {
+    row.FieldID = s.field.sprocket_field_id
+    row.FieldIDs = s.field.sprocket_field_id
+    row.FieldName = s.field.name
+    row.FieldNames = s.field.name
+  }
+  if (s.arrival_minutes != null && s.start_time) {
+    row.ArrivalTime = sprocketTime(dayjs(`2000-01-01T${s.start_time}`).subtract(s.arrival_minutes, 'minute').format('HH:mm:ss'))
+  }
+  row.IsPrivate = yesNo(s.is_private)
+  if (s.event_type === 'game') {
+    row.Opponent = s.opponent ?? base.Opponent
+    row.AwayGame = yesNo(s.away_game)
+  }
+  const coachesChanged = s.appManaged || !sameSet(s.coachIds ?? [], s.snapshotCoachIds ?? [])
+  if (coachesChanged) row.Notes = coachesNote(s.coachNames)
+  if (s.appManaged) row.Title = s.event_type === 'game' ? base.Title : s.session_name || s.programName
+  return { row, problem }
+}
+
+export function buildChangedRows(sessions: ExportSession[], scheduleSourceFrom: string | null): ChangedResult {
+  const result: ChangedResult = { csvRows: [], rowIds: [], changes: [], problems: [], unchanged: 0, notYours: 0 }
+  for (const s of [...sessions].sort((a, b) => (a.event_date + (a.start_time ?? '')).localeCompare(b.event_date + (b.start_time ?? '')))) {
+    const linked = s.rows.filter((r) => r.state === 'linked' && r.club_calendar_event_id)
+    if (!linked.length) continue
+    const yours = s.appManaged || (!!scheduleSourceFrom && s.event_date >= scheduleSourceFrom)
+    if (!yours) {
+      result.notYours += linked.length
+      continue
+    }
+    for (const r of linked) {
+      const { row, problem } = desiredLinkedRow(s, r)
+      const base = r.sprocketRow ?? {}
+      const fields = COMPARED.filter(([c]) => norm(row[c]) !== norm(base[c])).map(([, label]) => label)
+      if (!fields.length) {
+        result.unchanged += 1
+        continue
+      }
+      if (problem) {
+        result.problems.push({ sessionId: s.id, label: sessionLabel(s), reason: problem })
+        continue
+      }
+      const describe = (x: Record<string, string>) =>
+        `${x.StartDate} ${x.StartDateTime}–${x.EndDateTime}${norm(x.IsCancelled) === 'yes' ? ' (cancelled)' : ''}${x.Notes ? ' · ' + x.Notes : ''}`
+      result.csvRows.push(row)
+      result.rowIds.push(r.id)
+      result.changes.push({
+        rowId: r.id,
+        sessionId: s.id,
+        label: sessionLabel(s),
+        team: r.team?.name ?? 'Club',
+        fields: [...new Set(fields)],
+        before: describe(base as Record<string, string>),
+        after: describe(row),
+      })
     }
   }
   return result

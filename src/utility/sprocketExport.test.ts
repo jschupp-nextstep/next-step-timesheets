@@ -2,7 +2,7 @@ import Papa from 'papaparse'
 import { describe, expect, it } from 'vitest'
 
 import { parseCoachNames, parseSprocketCsv } from './parseSprocketCsv'
-import { buildNewRows, coachesNote, SPROCKET_COLUMNS, type ExportSession } from './sprocketExport'
+import { buildChangedRows, buildNewRows, coachesNote, SPROCKET_COLUMNS, type ExportSession } from './sprocketExport'
 
 const apTeams = [
   { id: 'r1', sprocket_team_id: '73441', name: 'Annual Program- Jr. Academy' },
@@ -126,5 +126,94 @@ describe('coachesNote', () => {
   it('reads back with parseCoachNames', () => {
     expect(parseCoachNames(coachesNote(['Max Smith', 'Taron Mills']))).toEqual(['Max Smith', 'Taron Mills'])
     expect(coachesNote([])).toBe('')
+  })
+})
+
+describe('buildChangedRows (step 5)', () => {
+  // Fall's first row as Sprocket has it: Final Third Clinic, Keith in Notes.
+  const stored = {
+    ClubID: '371', ClubName: 'Next Step Training', Title: 'Final Third Clinic — Keith', StartDate: '10/19/2026',
+    StartDateTime: '04:00 PM', EndDate: '10/19/2026', EndDateTime: '05:00 PM', ShowTime: 'Yes', IsPrivate: 'No',
+    IsCancelled: 'No', ArrivalTime: '03:45 PM', AwayGame: 'No', LocationID: '34517', LocationName: 'Dover Sherborn - Laurel Fields',
+    ProgramID: '29173', ProgramName: 'DSSC 2026-2027', ClubEventType: 'Practice', TeamID: '140275', TeamName: 'Final Third Clinic',
+    TimeZoneID: '7', ClubCalendarEventID: '3740907', Notes: 'Keith', SavedBy: 'Schupp, Justin', SavedOn: '10/6/2026 12:36:08 PM', Draft: 'No',
+  }
+  const imported: ExportSession = {
+    ...base,
+    id: 'f1',
+    event_date: '2026-10-19',
+    start_time: '16:00:00',
+    end_time: '17:00:00',
+    session_name: 'Final Third Clinic',
+    programName: 'Town Session',
+    arrival_minutes: 15,
+    location: { name: 'Dover Sherborn - Laurel Fields', sprocket_location_id: '34517' },
+    coachNames: ['Keith Thompson'],
+    coachIds: ['keith'],
+    snapshotCoachIds: ['keith'],
+    appManaged: false,
+    rows: [{ id: 'x1', state: 'linked', club_calendar_event_id: '3740907', sprocket_team_id: '140275', team: { name: 'Final Third Clinic', sprocket_program_id: '29173', programName: 'DSSC 2026-2027' }, sprocketRow: stored }],
+  }
+
+  it('sends nothing for an imported session nobody changed (keeps Sprocket’s title and notes)', () => {
+    const r = buildChangedRows([imported], '2026-10-01')
+    expect(r.csvRows).toEqual([])
+    expect(r.unchanged).toBe(1)
+  })
+
+  it('leaves sessions Sprocket still schedules alone before the switch', () => {
+    const moved = { ...imported, start_time: '16:30:00' }
+    const r = buildChangedRows([moved], null)
+    expect(r.csvRows).toEqual([])
+    expect(r.notYours).toBe(1)
+  })
+
+  it('sends a time change by ID with Sprocket’s own title and notes kept', () => {
+    const moved = { ...imported, start_time: '16:30:00', end_time: '17:30:00' }
+    const r = buildChangedRows([moved], '2026-10-01')
+    expect(r.changes[0].fields).toEqual(['start', 'end', 'arrival'])
+    expect(r.csvRows[0]).toMatchObject({
+      ClubCalendarEventID: '3740907',
+      StartDateTime: '04:30 PM',
+      EndDateTime: '05:30 PM',
+      ArrivalTime: '04:15 PM',
+      Title: 'Final Third Clinic — Keith',
+      Notes: 'Keith',
+      TeamID: '140275',
+      SavedBy: '',
+      DeleteEvent: '',
+    })
+  })
+
+  it('rewrites Notes when the coaches changed here (a sub)', () => {
+    const subbed = { ...imported, coachIds: ['taron'], coachNames: ['Taron Mills'] }
+    const r = buildChangedRows([subbed], '2026-10-01')
+    expect(r.changes[0].fields).toEqual(['coaches'])
+    expect(r.csvRows[0].Notes).toBe('Coaches: Taron Mills')
+  })
+
+  it('sends a cancellation as IsCancelled=Yes', () => {
+    const r = buildChangedRows([{ ...imported, is_cancelled: true }], '2026-10-01')
+    expect(r.changes[0].fields).toEqual(['cancelled'])
+    expect(r.csvRows[0].IsCancelled).toBe('Yes')
+  })
+
+  it('owns title and notes on a session made here, before the switch too', () => {
+    const uploaded = { ...stored, Title: 'Annual Program', Notes: 'Coaches: Keith Thompson' }
+    const mine: ExportSession = {
+      ...imported,
+      appManaged: true,
+      session_name: 'Annual Program',
+      snapshotCoachIds: null,
+      rows: [{ ...imported.rows[0], sprocketRow: uploaded }],
+    }
+    expect(buildChangedRows([mine], null).csvRows).toEqual([])
+    const renamed = buildChangedRows([{ ...mine, session_name: 'AP Practice' }], null)
+    expect(renamed.changes[0].fields).toEqual(['title'])
+  })
+
+  it('keeps Sprocket’s location when the app has the session at Location TBD', () => {
+    const tbd = { ...imported, location: { name: 'Location TBD', sprocket_location_id: null } }
+    expect(buildChangedRows([tbd], '2026-10-01').csvRows).toEqual([])
   })
 })
