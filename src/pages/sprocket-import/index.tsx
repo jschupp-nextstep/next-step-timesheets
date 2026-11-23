@@ -5,6 +5,8 @@ import { InboxOutlined } from '@ant-design/icons'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import { checkImportFile } from '../../utility/importFileCheck'
+import { fileDateRange, planLinks } from '../../utility/sprocketLink'
+import { loadUnlinkedAppRows } from '../../utility/sprocketLinkData'
 import {
   groupEventsByLocationBlock,
   parseSprocketCsv,
@@ -21,6 +23,7 @@ type LocationRow = {
   category: 'camp_nurse' | 'regular'
   half_day_hours: number | null
   full_day_hours: number | null
+  sprocket_location_id: string | null
 }
 
 // Sprocket's program names don't match ours verbatim -- adjust here if
@@ -150,6 +153,7 @@ type SkippedEvent = {
 }
 
 type ImportSummary = {
+  eventsManagedHere: number
   eventsUpdated: number
   eventsUnchanged: number
   changes: string[]
@@ -178,6 +182,12 @@ export const SprocketImport = () => {
   const [skippedRows, setSkippedRows] = useState<SkippedRow[]>([])
   // Sprocket row id -> our event id, for events imported before.
   const [existingBySprocketId, setExistingBySprocketId] = useState<Map<string, string>>(new Map())
+  // Sessions made in this app and linked (0037): never changed by an import.
+  const [appManagedEventIds, setAppManagedEventIds] = useState<Set<string>>(new Set())
+  // Sprocket rows that look like this app's own not-yet-linked rows (an
+  // Export to Sprocket file uploaded, IDs not linked yet): never created
+  // again as new sessions.
+  const [unlinkedAppIds, setUnlinkedAppIds] = useState<Set<string>>(new Set())
   const [matchError, setMatchError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   // Shown in place of the mapping screen while the import runs (Justin: the
@@ -287,6 +297,19 @@ export const SprocketImport = () => {
       const candidates = locations.filter((l) =>
         block.isCampProgram ? l.category === 'camp_nurse' : l.category === 'regular',
       )
+      // Phase 9: a regular location with this Sprocket LocationID (set on
+      // Sprocket Mappings) is the match.
+      const sprocketLocationId = events
+        .find((e) => e.locationName === block.locationName)
+        ?.rows.find((r) => r.LocationID?.trim())
+        ?.LocationID?.trim()
+      const byId = !block.isCampProgram && sprocketLocationId
+        ? candidates.filter((l) => l.sprocket_location_id === sprocketLocationId)
+        : []
+      if (byId.length === 1) {
+        nextLocationMap[block.key] = byId[0].id
+        continue
+      }
       // A block's date span is often an exact or near-exact match for one of
       // our dated location names -- try that before falling back to a bare
       // name match.
@@ -326,18 +349,36 @@ export const SprocketImport = () => {
     setMatchError(null)
     const ids = events.flatMap((e) => e.sprocketIds)
     const found = new Map<string, string>()
+    const managed = new Set<string>()
     for (let i = 0; i < ids.length; i += 150) {
       const { data, error } = await supabaseClient
         .from('events')
-        .select('id, sprocket_event_ids')
+        .select('id, sprocket_event_ids, app_managed')
         .overlaps('sprocket_event_ids', ids.slice(i, i + 150))
       if (error) {
         setMatchError(error.message)
         break
       }
-      for (const row of data ?? []) for (const id of row.sprocket_event_ids ?? []) found.set(id, row.id)
+      for (const row of data ?? []) {
+        for (const id of row.sprocket_event_ids ?? []) found.set(id, row.id)
+        if (row.app_managed) managed.add(row.id)
+      }
     }
     setExistingBySprocketId(found)
+    setAppManagedEventIds(managed)
+
+    const rawRows = events.flatMap((e) => e.rows)
+    const range = fileDateRange(rawRows)
+    const unlinked = new Set<string>()
+    if (range) {
+      const app = await loadUnlinkedAppRows(range.from, range.to)
+      if (app.error) setMatchError(app.error)
+      const plan = planLinks(rawRows, app.rows, new Set(found.keys()))
+      for (const m of [...plan.auto.map((a) => a.sprocket), ...plan.ambiguous.map((a) => a.sprocket)]) {
+        unlinked.add(m.ClubCalendarEventID.trim())
+      }
+    }
+    setUnlinkedAppIds(unlinked)
 
     return false // prevent antd Upload from actually uploading anywhere
   }
@@ -384,6 +425,7 @@ export const SprocketImport = () => {
       const existingSignatures = new Set((existingEvents ?? []).map(existingKey))
       const locationsById = new Map(locations.map((l) => [l.id, l]))
 
+      let eventsManagedHere = 0
       let eventsUpdated = 0
       let eventsUnchanged = 0
       const changes: string[] = []
@@ -480,6 +522,14 @@ export const SprocketImport = () => {
         }
 
         const existingId = event.sprocketIds.map((id) => existingBySprocketId.get(id)).find(Boolean)
+        if (existingId && appManagedEventIds.has(existingId)) {
+          eventsManagedHere += 1
+          continue
+        }
+        if (!existingId && event.sprocketIds.some((id) => unlinkedAppIds.has(id))) {
+          recordSkip(event, 'Made in this app and uploaded, but its Sprocket IDs aren\'t linked yet -- use Link Sprocket IDs')
+          continue
+        }
         if (existingId) {
           const { data: result, error: syncError } = await supabaseClient.rpc('sprocket_sync_event', {
             p_event_id: existingId,
@@ -562,6 +612,7 @@ export const SprocketImport = () => {
       }
 
       setSummary({
+        eventsManagedHere,
         eventsUpdated,
         eventsUnchanged,
         changes,
@@ -635,6 +686,15 @@ export const SprocketImport = () => {
                 : `None of these were imported before -- all ${parsed.length} are new.`
             }
           />
+          {unlinkedAppIds.size > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="warning"
+              showIcon
+              message={`${unlinkedAppIds.size} row(s) look like sessions made in this app whose Sprocket IDs aren't linked yet`}
+              description="They won't be imported again (that would duplicate them). Upload this same file on Link Sprocket IDs to link them."
+            />
+          )}
           {matchError && (
             <Alert
               style={{ marginTop: 16 }}
@@ -896,6 +956,9 @@ export const SprocketImport = () => {
               <ul style={{ marginBottom: 0 }}>
                 <li>{summary.eventsCreated} events created</li>
                 <li>{summary.eventsUpdated} previously imported events updated from Sprocket</li>
+                {summary.eventsManagedHere > 0 && (
+                  <li>{summary.eventsManagedHere} sessions made in this app left as they are (scheduled here, not from Sprocket)</li>
+                )}
                 <li>{summary.eventsUnchanged} previously imported events unchanged</li>
                 <li>{summary.eventsSkippedExisting} events already existed, skipped</li>
                 <li>{summary.eventsSkippedUnresolved} events skipped (program or location left for later)</li>

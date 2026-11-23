@@ -79,6 +79,9 @@ const Settings = lazy(() => import('./pages/settings').then((m) => ({ default: m
 const SprocketImport = lazy(() =>
   import('./pages/sprocket-import').then((m) => ({ default: m.SprocketImport })),
 )
+const SprocketLink = lazy(() =>
+  import('./pages/sprocket-link').then((m) => ({ default: m.SprocketLink })),
+)
 const SprocketExport = lazy(() =>
   import('./pages/sprocket-export').then((m) => ({ default: m.SprocketExport })),
 )
@@ -189,6 +192,7 @@ const AdminRoutes = () => (
       <Route path="/sprocket-import" element={<SprocketImport />} />
       <Route path="/sprocket-mappings" element={<SprocketMappings />} />
       <Route path="/sprocket-export" element={<SprocketExport />} />
+      <Route path="/sprocket-link" element={<SprocketLink />} />
       <Route path="/bulk-import" element={<BulkImport />} />
       <Route path="/reconciliation" element={<Reconciliation />} />
       <Route path="/payment-due" element={<PaymentDue />} />
@@ -422,6 +426,11 @@ function App() {
                   name: 'sprocket-export',
                   list: '/sprocket-export',
                   meta: { label: 'Export to Sprocket' },
+                },
+                {
+                  name: 'sprocket-link',
+                  list: '/sprocket-link',
+                  meta: { label: 'Link Sprocket IDs' },
                 },
                 {
                   name: 'sprocket-mappings',

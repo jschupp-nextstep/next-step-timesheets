@@ -10,6 +10,7 @@ import {
   FieldTimeOutlined,
   FileTextOutlined,
   ImportOutlined,
+  LinkOutlined,
   ScheduleOutlined,
   SettingOutlined,
   TagsOutlined,
@@ -79,6 +80,12 @@ const SECTIONS: TileSection[] = [
         title: 'Export to Sprocket',
         description: "Download the sessions made here that aren't in Sprocket yet, ready for Sprocket's calendar import.",
         icon: <ExportOutlined />,
+      },
+      {
+        to: '/sprocket-link',
+        title: 'Link Sprocket IDs',
+        description: 'After uploading an export, upload Sprocket’s calendar here so its new rows are tied to these sessions.',
+        icon: <LinkOutlined />,
       },
       {
         to: '/sprocket-mappings',

@@ -189,7 +189,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
 | 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9 done 2026-10-14 (routine scheduler adds skip review; Luis's scheduler login deferred — Justin schedules AP himself for now) |
-| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; steps 1 (mappings, event fields, AP merge), 2 (session series) and 3 (export of new rows) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
+| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; steps 1 (mappings, event fields, AP merge), 2 (session series), 3 (export of new rows) and 4 (link IDs) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0036`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0037` (0037 written 2026-11-22, not yet run), applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -471,6 +471,27 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   Sprocket ID); existing rows in range excluded. Test sessions deleted.
 - **Not yet checked against Sprocket itself** — waits on Justin's one-row test
   (`sprocket-test/`).
+
+### Step 4 built (2026-11-22, `0037_link_sprocket_ids.sql`; run BEFORE pushing — the importer reads `app_managed`)
+- **`/sprocket-link`** ("Link Sprocket IDs"): upload a Sprocket calendar export after uploading an
+  Export to Sprocket file. `planLinks()` (`src/utility/sprocketLink.ts`, tested) matches each
+  Sprocket row whose ID the app doesn't know to an app row in state `new` by **team (or, for Club,
+  Sprocket LocationID) + date + start time**; the title only breaks a tie. One-to-one both ways →
+  automatic; otherwise picked by hand (e.g. a file uploaded to Sprocket twice — the duplicate is
+  deleted in Sprocket). Also lists app rows in the file's dates that nothing matched.
+- **`sprocket_link_rows(links)`** (admin): sets `club_calendar_event_id`, state `linked`, raw row;
+  rebuilds the event's `sprocket_event_ids` / `sprocket_rows` (so the importer finds it) and sets
+  **`events.app_managed`**.
+- **Importer**: a session matched by ID that is `app_managed` is never synced from Sprocket
+  ("left as they are" in the summary) — the app schedules it, Sprocket is downstream; a new-looking
+  Sprocket row that matches an unlinked app row is **not** created (skipped: "link its IDs first",
+  with a warning before import) — so uploading the export and then importing Sprocket's calendar
+  can't duplicate. Regular locations now auto-map by `sprocket_location_id`.
+- 0037 also adds the winter locations: Sluggers Academy (66190), Medway Middle School (70435),
+  Fore Kicks Sports Complex and Golf Course (66775).
+- **Winter import at the switch** needs nothing new: Import Calendar with `Winter Calendar.csv`
+  creates DSA and futsal with their Sprocket IDs linked (the normal import path). Map the blank
+  program (futsal Club rows) to Futsal; DSA teams → Town Session as in fall.
 
 ### What already exists (as of 2026-11-22)
 - `events`: program, location, date, start/end, `session_name` (= Sprocket Title), notes,
