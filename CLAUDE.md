@@ -544,7 +544,7 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   → none to link. Session deleted; the two test file records (one discarded, one uploaded, dated
   11/22 19:51–19:52) remain — no API delete; Justin can remove them in SQL.
 
-### Step 7 built (2026-11-22, `0040_sprocket_deletes.sql`; run BEFORE pushing)
+### Step 7 built (2026-11-22, `0040_sprocket_deletes.sql`, run and deployed 2026-11-22)
 - The app had **no delete** before (only cancel). **`schedule_delete_event(event, reason)`** —
   admin only; refuses sessions with logged hours, claims or swap requests ("cancel it instead");
   assignments and history go with it. "Delete session" (admins only) on the session page, with a
@@ -559,7 +559,20 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   unused); `sprocket_export_batch_deletions`; `deleted_rows` on files; marking a file uploaded sets
   its deletes `sent`. A delete in a waiting file isn't put in another.
 - **Importer** skips a Sprocket row whose IDs were all deleted here ("Deleted in this app"), so a
-  deleted session doesn't come back.
+  deleted session doesn't come back; the preview warns "N session(s) in this file were deleted in this app".
+- Verified 2026-11-22 with temporary AP sessions: delete refused with a logged entry and with a
+  blank reason; a linked session (made-up IDs) → 3 `pending`, listed under "Deleted here", file
+  rows `DeleteEvent=Yes` with the IDs; the same deletes in a second file → refused while the first
+  waits; Mark uploaded → `sent`; a never-linked session from an uploaded file → 3 `manual` on the
+  "Delete by hand" list, Done → `done` (twice → "already handled"); Import Calendar with a deleted
+  ID → 0 created, "Deleted in this app"; "Delete session" on screen → deleted, back to the board,
+  nothing recorded (never in Sprocket). Test records remain (no API delete): 6
+  `sprocket_deletions` (IDs 999000301–303 + 3 without) and 2 more test export files.
+- **`0041_keep_sprocket_names.sql`** (found during this check): the 0035 sync trigger replaced a
+  Sprocket team/program/field name with its bare ID when a row arrived without the name — test
+  rows did that to the three AP default teams (named "73441" etc.; exports would have sent those
+  as TeamName). 0041 keeps the stored name in that case and restores names from stored raw rows.
+  Same function signature; safe in either order with the code.
 
 ### AP back-to-back rule built (2026-11-22, no migration)
 - `paidEarlyMinutes()` (`src/utils/hours.ts`) caps early minutes at the gap since the coach's

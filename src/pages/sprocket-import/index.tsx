@@ -241,6 +241,17 @@ export const SprocketImport = () => {
     () => (parsed ?? []).filter((e) => e.sprocketIds.some((id) => existingBySprocketId.has(id))).length,
     [parsed, existingBySprocketId],
   )
+  // Sessions deleted here (0040): skipped on import, so not "new".
+  const deletedHereCount = useMemo(
+    () =>
+      (parsed ?? []).filter(
+        (e) =>
+          e.sprocketIds.length > 0 &&
+          !e.sprocketIds.some((id) => existingBySprocketId.has(id)) &&
+          e.sprocketIds.every((id) => deletedHereIds.has(id)),
+      ).length,
+    [parsed, existingBySprocketId, deletedHereIds],
+  )
 
   const handleFile = async (file: File) => {
     const text = await file.text()
@@ -702,8 +713,8 @@ export const SprocketImport = () => {
             message={`${parsed.length} events found, referencing ${distinctProgramNames.length + (hasCampEvents ? 1 : 0)} program name(s), ${locationBlocks.length} location/date block(s), and ${distinctCoachNames.length} coach name(s).`}
             description={
               matchedCount > 0
-                ? `${matchedCount} of them were imported before (matched by Sprocket's event ID) and will only change where Sprocket changed something since; ${parsed.length - matchedCount} are new.`
-                : `None of these were imported before -- all ${parsed.length} are new.`
+                ? `${matchedCount} of them were imported before (matched by Sprocket's event ID) and will only change where Sprocket changed something since; ${parsed.length - matchedCount - deletedHereCount} are new.`
+                : `None of these were imported before -- all ${parsed.length - deletedHereCount} are new.`
             }
           />
           {unlinkedAppIds.size > 0 && (
@@ -713,6 +724,15 @@ export const SprocketImport = () => {
               showIcon
               message={`${unlinkedAppIds.size} row(s) look like sessions made in this app whose Sprocket IDs aren't linked yet`}
               description="They won't be imported again (that would duplicate them). Upload this same file on Link Sprocket IDs to link them."
+            />
+          )}
+          {deletedHereCount > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="warning"
+              showIcon
+              message={`${deletedHereCount} session(s) in this file were deleted in this app`}
+              description="They won't be imported again. Their deletes go to Sprocket with Export to Sprocket (New and changed)."
             />
           )}
           {matchError && (
