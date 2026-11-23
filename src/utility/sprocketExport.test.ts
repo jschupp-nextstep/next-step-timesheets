@@ -217,3 +217,17 @@ describe('buildChangedRows (step 5)', () => {
     expect(buildChangedRows([tbd], '2026-10-01').csvRows).toEqual([])
   })
 })
+
+describe('buildNewRows holds rows already in an open export file (step 6)', () => {
+  it('leaves out held rows and lists the session', () => {
+    const r = buildNewRows([base], new Map(), undefined, new Map([['r1', 'uploaded' as const]]))
+    expect(r.rowIds).toEqual(['r2'])
+    expect(r.held).toEqual([{ sessionId: 'e1', label: expect.any(String), status: 'uploaded' }])
+  })
+  it('sends nothing for a session whose rows are all held, without calling it a problem', () => {
+    const r = buildNewRows([base], new Map(), undefined, new Map([['r1', 'waiting' as const], ['r2', 'uploaded' as const]]))
+    expect(r.csvRows).toEqual([])
+    expect(r.problems).toEqual([])
+    expect(r.held[0].status).toBe('waiting')
+  })
+})

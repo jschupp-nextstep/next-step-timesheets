@@ -102,6 +102,8 @@ export type ExportResult = {
   problems: ExportProblem[]
   cancelledSkipped: number
   alreadyInSprocket: number
+  // New rows already in an open export file (step 6) -- not sent again.
+  held: { sessionId: string; label: string; status: 'waiting' | 'uploaded' }[]
 }
 
 const yesNo = (v: boolean) => (v ? 'Yes' : 'No')
@@ -120,18 +122,25 @@ export const sessionLabel = (s: Pick<ExportSession, 'event_date' | 'start_time' 
 
 // Rows for sessions not yet in Sprocket (state 'new'). Each session is all or
 // nothing: one with a problem contributes no rows, and is listed instead.
+// heldRows: new rows in an export file that's waiting for upload, or uploaded
+// and not linked yet -- sending them again would create them twice.
 export function buildNewRows(
   sessions: ExportSession[],
   rsvpByTeam: Map<string, RsvpTemplate>,
   clubRsvp: RsvpTemplate = DEFAULT_RSVP,
+  heldRows: ReadonlyMap<string, 'waiting' | 'uploaded'> = new Map(),
 ): ExportResult {
-  const result: ExportResult = { csvRows: [], rowIds: [], problems: [], cancelledSkipped: 0, alreadyInSprocket: 0 }
+  const result: ExportResult = { csvRows: [], rowIds: [], problems: [], cancelledSkipped: 0, alreadyInSprocket: 0, held: [] }
 
   for (const s of [...sessions].sort((a, b) => (a.event_date + (a.start_time ?? '')).localeCompare(b.event_date + (b.start_time ?? '')))) {
-    const newRows = s.rows.filter((r) => r.state === 'new')
+    const heldHere = s.rows.filter((r) => r.state === 'new' && heldRows.has(r.id))
+    if (heldHere.length) {
+      result.held.push({ sessionId: s.id, label: sessionLabel(s), status: heldHere.some((r) => heldRows.get(r.id) === 'waiting') ? 'waiting' : 'uploaded' })
+    }
+    const newRows = s.rows.filter((r) => r.state === 'new' && !heldRows.has(r.id))
     result.alreadyInSprocket += s.rows.filter((r) => r.state !== 'new').length
     if (newRows.length === 0) {
-      if (s.rows.length === 0) {
+      if (s.rows.length === 0 && !heldHere.length) {
         result.problems.push({
           sessionId: s.id,
           label: sessionLabel(s),

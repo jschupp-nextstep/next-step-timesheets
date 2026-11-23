@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
-import { Alert, App, Button, Card, DatePicker, Popconfirm, Radio, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, DatePicker, Radio, Select, Space, Table, Tag, Typography } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import Papa from 'papaparse'
 import dayjs, { type Dayjs } from 'dayjs'
 
 import { supabaseClient } from '../../utility/supabaseClient'
 import { useAppSettings } from '../../utility/appSettings'
+import { ExportHistory, saveCsv } from './ExportHistory'
 import {
   buildChangedRows,
   buildNewRows,
@@ -102,8 +103,8 @@ export const SprocketExport = () => {
   const scheduleSourceFrom = settings?.schedule_source_from ?? null
   const [mode, setMode] = useState<'changes' | 'new'>('changes')
   const [changed, setChanged] = useState<ChangedResult | null>(null)
-  const [recording, setRecording] = useState(false)
-  const [recorded, setRecorded] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [historyKey, setHistoryKey] = useState(0)
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().startOf('day'), dayjs().add(120, 'day')])
   const [programIds, setProgramIds] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
@@ -123,7 +124,6 @@ export const SprocketExport = () => {
     setError(null)
     setResult(null)
     setChanged(null)
-    setRecorded(null)
     try {
       const from = range[0].format('YYYY-MM-DD')
       const to = range[1].format('YYYY-MM-DD')
@@ -136,7 +136,7 @@ export const SprocketExport = () => {
         .order('start_time')
         .range(0, 4999)
       if (programIds.length) query = query.in('program_id', programIds)
-      const [events, templates] = await Promise.all([
+      const [events, templates, held] = await Promise.all([
         query,
         // RSVP settings from each team's (and Club) rows already in Sprocket.
         supabaseClient
@@ -144,8 +144,16 @@ export const SprocketExport = () => {
           .select('sprocket_team_id, rsvp:sprocket_row->>CollectRSVP, staff:sprocket_row->>CollectStaffRSVP')
           .eq('state', 'linked')
           .range(0, 9999),
+        // New rows already in an open file (step 6, 0039).
+        supabaseClient
+          .from('sprocket_export_batch_rows')
+          .select('row_id, sprocket_export_batches!inner(status), event_sprocket_rows!inner(state)')
+          .eq('kind', 'new')
+          .in('sprocket_export_batches.status', ['waiting_upload', 'uploaded'])
+          .eq('event_sprocket_rows.state', 'new')
+          .range(0, 9999),
       ])
-      const err = events.error ?? templates.error
+      const err = events.error ?? templates.error ?? held.error
       if (err) {
         setError(err.message)
         return
@@ -158,7 +166,12 @@ export const SprocketExport = () => {
         else clubRsvp = template
       }
       const sessions = ((events.data ?? []) as unknown as EventRow[]).map(toSession)
-      setResult(buildNewRows(sessions, rsvpByTeam, clubRsvp))
+      const heldRows = new Map<string, 'waiting' | 'uploaded'>()
+      for (const h of (held.data ?? []) as unknown as { row_id: string; sprocket_export_batches: { status: string } }[]) {
+        const status = h.sprocket_export_batches.status === 'waiting_upload' ? 'waiting' : 'uploaded'
+        if (heldRows.get(h.row_id) !== 'waiting') heldRows.set(h.row_id, status)
+      }
+      setResult(buildNewRows(sessions, rsvpByTeam, clubRsvp, heldRows))
       setChanged(mode === 'changes' ? buildChangedRows(sessions, scheduleSourceFrom) : null)
       setBuilt({ from, to })
     } finally {
@@ -169,39 +182,39 @@ export const SprocketExport = () => {
   // New rows first, then changes by ID.
   const fileRows: SprocketCsvRow[] = [...(result?.csvRows ?? []), ...(changed?.csvRows ?? [])]
 
-  const download = () => {
+  // Records the file (0039) and then downloads it. The record holds its new
+  // rows back from later files until it's marked uploaded and linked, or
+  // discarded.
+  const download = async () => {
     if (!result || !built) return
     const csv = Papa.unparse({
       fields: [...SPROCKET_COLUMNS],
       data: fileRows.map((r) => SPROCKET_COLUMNS.map((c) => r[c])),
     })
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `sprocket-${changed ? 'changes' : 'new-sessions'}-${built.from}-to-${built.to}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  // After the file is in Sprocket: what Sprocket has for each changed row is
-  // now what was sent (0038), so it isn't listed again.
-  const recordUpload = async () => {
-    if (!changed?.csvRows.length) return
-    setRecording(true)
+    setSaving(true)
     try {
-      const { data, error: rpcError } = await supabaseClient.rpc('sprocket_mark_uploaded', {
-        p_rows: changed.csvRows.map((row, i) => ({ row_id: changed.rowIds[i], sprocket_row: row })),
+      const { error: rpcError } = await supabaseClient.rpc('sprocket_create_batch', {
+        p_mode: changed ? 'changes' : 'new',
+        p_from: built.from,
+        p_to: built.to,
+        p_program_ids: programIds,
+        p_csv: csv,
+        p_rows: [
+          ...result.csvRows.map((row, i) => ({ row_id: result.rowIds[i], kind: 'new', sent_row: row })),
+          ...(changed?.csvRows ?? []).map((row, i) => ({ row_id: changed!.rowIds[i], kind: 'change', sent_row: row })),
+        ],
       })
       if (rpcError) {
         message.error({ content: rpcError.message, duration: 8 })
         return
       }
-      setRecorded(data as number)
-      setChanged(null)
+      saveCsv(csv, `sprocket-${changed ? 'changes' : 'new-sessions'}-${built.from}-to-${built.to}.csv`)
       setResult(null)
-      message.success('Recorded')
+      setChanged(null)
+      setHistoryKey((k) => k + 1)
+      message.success('Downloaded -- upload it to Sprocket, then mark it uploaded below')
     } finally {
-      setRecording(false)
+      setSaving(false)
     }
   }
 
@@ -257,15 +270,7 @@ export const SprocketExport = () => {
         </Typography.Paragraph>
       </Card>
 
-      {recorded !== null && (
-        <Alert
-          style={{ marginTop: 16 }}
-          type="success"
-          showIcon
-          message={`Recorded ${recorded} row(s) as uploaded`}
-          description="Sessions made in this file's new rows still need Link Sprocket IDs."
-        />
-      )}
+      <ExportHistory refreshKey={historyKey} />
 
       {error && <Alert type="error" style={{ marginTop: 16 }} message="Couldn't load sessions" description={error} />}
 
@@ -284,6 +289,15 @@ export const SprocketExport = () => {
             }
             description={
               <>
+                {result.held.length > 0 && (
+                  <div>
+                    {result.held.length} new session(s) left out: already in an export file
+                    {result.held.some((h) => h.status === 'waiting')
+                      ? ' (mark that file uploaded or discard it, below)'
+                      : ' that was uploaded -- link their IDs on Link Sprocket IDs'}
+                    .
+                  </div>
+                )}
                 {changed ? (
                   <>
                     {changed.unchanged > 0 && <div>{changed.unchanged} row(s) already in Sprocket and unchanged.</div>}
@@ -301,21 +315,9 @@ export const SprocketExport = () => {
             }
             action={
               fileRows.length > 0 && (
-                <Space direction="vertical">
-                  <Button type="primary" icon={<DownloadOutlined />} onClick={download}>
-                    Download CSV
-                  </Button>
-                  {!!changed?.csvRows.length && (
-                    <Popconfirm
-                      title="Uploaded to Sprocket?"
-                      description="Only once Sprocket has taken the file. The changed rows then stop being listed."
-                      okText="Yes, it's uploaded"
-                      onConfirm={recordUpload}
-                    >
-                      <Button loading={recording}>I've uploaded this file</Button>
-                    </Popconfirm>
-                  )}
-                </Space>
+                <Button type="primary" icon={<DownloadOutlined />} loading={saving} onClick={download}>
+                  Download CSV
+                </Button>
               )
             }
           />
@@ -325,7 +327,7 @@ export const SprocketExport = () => {
               type="warning"
               showIcon
               message="Upload this file to Sprocket once"
-              description="Sprocket creates a new event for every row without an ID. Until the IDs are linked back here (the next step), exporting and uploading the same sessions again would create them twice in Sprocket."
+              description="Downloading records the file below as waiting for upload. Once it's in Sprocket, mark it uploaded, then link the new sessions' IDs on Link Sprocket IDs. Until then they're kept out of new files, so Sprocket can't get them twice."
             />
           )}
 
