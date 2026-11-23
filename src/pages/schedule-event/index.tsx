@@ -17,7 +17,7 @@ import {
   Typography,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { Link, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import type { Identity } from '../../providers/authProvider'
 import { useScheduleAction, type ScheduleFunction } from '../../utility/scheduleActions'
@@ -53,6 +53,7 @@ type Action =
   | { kind: 'time' }
   | { kind: 'cancel' }
   | { kind: 'restore' }
+  | { kind: 'delete' }
 
 const ACTION_TITLES: Record<Action['kind'], string> = {
   sub: 'Sub in a coach',
@@ -61,6 +62,7 @@ const ACTION_TITLES: Record<Action['kind'], string> = {
   time: 'Change time',
   cancel: 'Cancel this session',
   restore: 'Restore this session',
+  delete: 'Delete this session',
 }
 
 // One event, its coaches, the quick actions, and its change history.
@@ -70,7 +72,9 @@ const ACTION_TITLES: Record<Action['kind'], string> = {
 export const ScheduleEvent = () => {
   const { id } = useParams()
   const { data: identity } = useGetIdentity<Identity>()
-  const backTo = identity?.role === 'admin' ? '/schedule-board' : '/schedule'
+  const isAdmin = identity?.role === 'admin'
+  const backTo = isAdmin ? '/schedule-board' : '/schedule'
+  const navigate = useNavigate()
   const { run, running } = useScheduleAction()
 
   const [action, setAction] = useState<Action | null>(null)
@@ -179,8 +183,17 @@ export const ScheduleEvent = () => {
         }
         success = action.kind === 'cancel' ? 'Session cancelled' : 'Session restored'
         break
+      case 'delete':
+        fn = 'schedule_delete_event'
+        args = { p_event_id: event.id, p_reason: reason }
+        success = 'Session deleted'
+        break
     }
     const ok = await run(fn, args, success)
+    if (ok && action.kind === 'delete') {
+      navigate(backTo)
+      return
+    }
     if (ok) {
       setAction(null)
       eventQuery.refetch()
@@ -262,6 +275,11 @@ export const ScheduleEvent = () => {
               Cancel session
             </Button>
           )}
+          {isAdmin && (
+            <Button danger type="link" onClick={() => openAction({ kind: 'delete' })}>
+              Delete session
+            </Button>
+          )}
         </Space>
       </Card>
 
@@ -294,8 +312,8 @@ export const ScheduleEvent = () => {
       <Modal
         open={!!action}
         title={action ? ACTION_TITLES[action.kind] : ''}
-        okText="Save change"
-        okButtonProps={{ disabled: !canSubmit, loading: running }}
+        okText={action?.kind === 'delete' ? 'Delete session' : 'Save change'}
+        okButtonProps={{ disabled: !canSubmit, loading: running, danger: action?.kind === 'delete' }}
         onOk={submit}
         onCancel={() => setAction(null)}
         destroyOnHidden
@@ -352,6 +370,15 @@ export const ScheduleEvent = () => {
                 </Form.Item>
               )}
             </>
+          )}
+          {action?.kind === 'delete' && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="Only for a session that shouldn't exist (made by mistake, a duplicate)."
+              description="It's removed with its coaches and history. If it's in Sprocket, the next Export to Sprocket deletes it there too. A session that was planned and then called off should be cancelled instead -- that keeps it on record. Sessions with logged hours, claims or swap requests can't be deleted."
+            />
           )}
           {action?.kind === 'cancel' && (
             <Form.Item label="When was it cancelled?" required>

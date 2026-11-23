@@ -11,6 +11,8 @@ import { ExportHistory, saveCsv } from './ExportHistory'
 import {
   buildChangedRows,
   buildNewRows,
+  deleteRow,
+  type PendingDeletion,
   DEFAULT_RSVP,
   SPROCKET_COLUMNS,
   type ChangedResult,
@@ -104,6 +106,10 @@ export const SprocketExport = () => {
   const [mode, setMode] = useState<'changes' | 'new'>('changes')
   const [changed, setChanged] = useState<ChangedResult | null>(null)
   const [saving, setSaving] = useState(false)
+  // Step 7 (0040): sessions deleted here -- sent as deletes, or (no ID) by hand.
+  const [deletions, setDeletions] = useState<PendingDeletion[] | null>(null)
+  const [manualDeletions, setManualDeletions] = useState<{ id: string; label: string; deleted_at: string }[]>([])
+  const [doneBusy, setDoneBusy] = useState<string | null>(null)
   const [historyKey, setHistoryKey] = useState(0)
   const [range, setRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().startOf('day'), dayjs().add(120, 'day')])
   const [programIds, setProgramIds] = useState<string[]>([])
@@ -124,6 +130,7 @@ export const SprocketExport = () => {
     setError(null)
     setResult(null)
     setChanged(null)
+    setDeletions(null)
     try {
       const from = range[0].format('YYYY-MM-DD')
       const to = range[1].format('YYYY-MM-DD')
@@ -136,7 +143,7 @@ export const SprocketExport = () => {
         .order('start_time')
         .range(0, 4999)
       if (programIds.length) query = query.in('program_id', programIds)
-      const [events, templates, held] = await Promise.all([
+      const [events, templates, held, dels, waitingDels] = await Promise.all([
         query,
         // RSVP settings from each team's (and Club) rows already in Sprocket.
         supabaseClient
@@ -152,8 +159,19 @@ export const SprocketExport = () => {
           .in('sprocket_export_batches.status', ['waiting_upload', 'uploaded'])
           .eq('event_sprocket_rows.state', 'new')
           .range(0, 9999),
+        supabaseClient
+          .from('sprocket_deletions')
+          .select('id, club_calendar_event_id, sprocket_row, label, status, deleted_at')
+          .in('status', ['pending', 'manual'])
+          .order('event_date')
+          .range(0, 9999),
+        supabaseClient
+          .from('sprocket_export_batch_deletions')
+          .select('deletion_id, sprocket_export_batches!inner(status)')
+          .eq('sprocket_export_batches.status', 'waiting_upload')
+          .range(0, 9999),
       ])
-      const err = events.error ?? templates.error ?? held.error
+      const err = events.error ?? templates.error ?? held.error ?? dels.error ?? waitingDels.error
       if (err) {
         setError(err.message)
         return
@@ -173,6 +191,13 @@ export const SprocketExport = () => {
       }
       setResult(buildNewRows(sessions, rsvpByTeam, clubRsvp, heldRows))
       setChanged(mode === 'changes' ? buildChangedRows(sessions, scheduleSourceFrom) : null)
+      // Deletes go in "New and changed" files, whatever the date range (a
+      // deleted session has no date on the calendar any more).
+      const inWaitingFile = new Set((waitingDels.data ?? []).map((d) => d.deletion_id as string))
+      type Del = PendingDeletion & { status: string; deleted_at: string }
+      const allDels = (dels.data ?? []) as Del[]
+      setDeletions(mode === 'changes' ? allDels.filter((d) => d.status === 'pending' && !inWaitingFile.has(d.id)) : null)
+      setManualDeletions(allDels.filter((d) => d.status === 'manual'))
       setBuilt({ from, to })
     } finally {
       setLoading(false)
@@ -180,7 +205,8 @@ export const SprocketExport = () => {
   }
 
   // New rows first, then changes by ID.
-  const fileRows: SprocketCsvRow[] = [...(result?.csvRows ?? []), ...(changed?.csvRows ?? [])]
+  const deleteRows = (deletions ?? []).map(deleteRow)
+  const fileRows: SprocketCsvRow[] = [...(result?.csvRows ?? []), ...(changed?.csvRows ?? []), ...deleteRows]
 
   // Records the file (0039) and then downloads it. The record holds its new
   // rows back from later files until it's marked uploaded and linked, or
@@ -203,6 +229,7 @@ export const SprocketExport = () => {
           ...result.csvRows.map((row, i) => ({ row_id: result.rowIds[i], kind: 'new', sent_row: row })),
           ...(changed?.csvRows ?? []).map((row, i) => ({ row_id: changed!.rowIds[i], kind: 'change', sent_row: row })),
         ],
+        p_deletes: (deletions ?? []).map((d, i) => ({ deletion_id: d.id, sent_row: deleteRows[i] })),
       })
       if (rpcError) {
         message.error({ content: rpcError.message, duration: 8 })
@@ -211,10 +238,22 @@ export const SprocketExport = () => {
       saveCsv(csv, `sprocket-${changed ? 'changes' : 'new-sessions'}-${built.from}-to-${built.to}.csv`)
       setResult(null)
       setChanged(null)
+      setDeletions(null)
       setHistoryKey((k) => k + 1)
       message.success('Downloaded -- upload it to Sprocket, then mark it uploaded below')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const markDone = async (id: string) => {
+    setDoneBusy(id)
+    try {
+      const { error: e } = await supabaseClient.rpc('sprocket_deletion_done', { p_deletion_id: id })
+      if (e) message.error({ content: e.message, duration: 8 })
+      else setManualDeletions((m) => m.filter((d) => d.id !== id))
+    } finally {
+      setDoneBusy(null)
     }
   }
 
@@ -229,8 +268,7 @@ export const SprocketExport = () => {
       <Typography.Paragraph type="secondary">
         Downloads a file for Sprocket's calendar import: sessions made in this app that aren't in Sprocket yet (one row
         per Sprocket team, one per Club session, coaches in Notes), and changes to sessions already there -- times,
-        coaches, cancellations -- sent by Sprocket ID so they update instead of duplicating. Deleting comes later: for
-        now delete in Sprocket by hand.
+        coaches, cancellations, deleted sessions -- sent by Sprocket ID so they update instead of duplicating.
       </Typography.Paragraph>
 
       <Card size="small">
@@ -270,6 +308,31 @@ export const SprocketExport = () => {
         </Typography.Paragraph>
       </Card>
 
+      {manualDeletions.length > 0 && (
+        <Alert
+          style={{ marginTop: 16 }}
+          type="warning"
+          showIcon
+          message={`Delete by hand in Sprocket (${manualDeletions.length})`}
+          description={
+            <>
+              <div>
+                These sessions were deleted here after being uploaded to Sprocket, but before their IDs were linked -- so
+                there's no ID to delete them by. Delete each one in Sprocket, then press Done.
+              </div>
+              {manualDeletions.map((d) => (
+                <div key={d.id} style={{ marginTop: 4 }}>
+                  {d.label}{' '}
+                  <Button size="small" loading={doneBusy === d.id} onClick={() => markDone(d.id)}>
+                    Done
+                  </Button>
+                </div>
+              ))}
+            </>
+          }
+        />
+      )}
+
       <ExportHistory refreshKey={historyKey} />
 
       {error && <Alert type="error" style={{ marginTop: 16 }} message="Couldn't load sessions" description={error} />}
@@ -284,7 +347,7 @@ export const SprocketExport = () => {
               fileRows.length
                 ? `${result.csvRows.length} new row(s) from ${sessionCount} session(s)${
                     changed ? `, ${changed.csvRows.length} changed row(s)` : ''
-                  }, ${dayjs(built.from).format('M/D')} – ${dayjs(built.to).format('M/D/YYYY')}`
+                  }${deleteRows.length ? `, ${deleteRows.length} delete(s)` : ''}, ${dayjs(built.from).format('M/D')} – ${dayjs(built.to).format('M/D/YYYY')}`
                 : 'Nothing to send to Sprocket in this range'
             }
             description={
@@ -345,6 +408,18 @@ export const SprocketExport = () => {
                 />
                 <Table.Column dataIndex="before" title="Sprocket has" />
                 <Table.Column dataIndex="after" title="Will be" />
+              </Table>
+            </Card>
+          )}
+
+          {deleteRows.length > 0 && (
+            <Card title={`Deleted here (${deleteRows.length})`} size="small" style={{ marginTop: 16 }}>
+              <Typography.Paragraph type="secondary">
+                Sessions deleted in this app that are in Sprocket -- sent as deletes, by Sprocket ID.
+              </Typography.Paragraph>
+              <Table dataSource={deletions ?? []} rowKey="id" size="small" pagination={{ pageSize: 25 }}>
+                <Table.Column dataIndex="label" title="Session (and team)" />
+                <Table.Column dataIndex="club_calendar_event_id" title="Sprocket ID" />
               </Table>
             </Card>
           )}

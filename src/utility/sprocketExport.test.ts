@@ -2,7 +2,7 @@ import Papa from 'papaparse'
 import { describe, expect, it } from 'vitest'
 
 import { parseCoachNames, parseSprocketCsv } from './parseSprocketCsv'
-import { buildChangedRows, buildNewRows, coachesNote, SPROCKET_COLUMNS, type ExportSession } from './sprocketExport'
+import { buildChangedRows, buildNewRows, coachesNote, deleteRow, SPROCKET_COLUMNS, type ExportSession } from './sprocketExport'
 
 const apTeams = [
   { id: 'r1', sprocket_team_id: '73441', name: 'Annual Program- Jr. Academy' },
@@ -229,5 +229,18 @@ describe('buildNewRows holds rows already in an open export file (step 6)', () =
     expect(r.csvRows).toEqual([])
     expect(r.problems).toEqual([])
     expect(r.held[0].status).toBe('waiting')
+  })
+})
+
+describe('deleteRow (step 7)', () => {
+  it('sends Sprocket’s own row with DeleteEvent=Yes and its ID', () => {
+    const row = deleteRow({
+      id: 'd1',
+      club_calendar_event_id: '3740907',
+      label: 'x',
+      sprocket_row: { Title: 'Final Third Clinic', StartDate: '10/19/2026', TeamID: '140275', SavedBy: 'Schupp, Justin', DeleteEvent: '' },
+    })
+    expect(Object.keys(row)).toHaveLength(SPROCKET_COLUMNS.length)
+    expect(row).toMatchObject({ ClubCalendarEventID: '3740907', DeleteEvent: 'Yes', Title: 'Final Third Clinic', TeamID: '140275', SavedBy: '', ClubID: '371' })
   })
 })

@@ -356,3 +356,18 @@ export function buildChangedRows(sessions: ExportSession[], scheduleSourceFrom: 
   }
   return result
 }
+
+// ---------------------------------------------------------------------------
+// Step 7: sessions deleted here (0040 sprocket_deletions). Sent as
+// Sprocket's own row with DeleteEvent=Yes, by ID.
+export type PendingDeletion = {
+  id: string
+  club_calendar_event_id: string
+  sprocket_row: Record<string, string> | null
+  label: string
+}
+
+export function deleteRow(d: PendingDeletion): SprocketCsvRow {
+  const base = Object.fromEntries(SPROCKET_COLUMNS.map((c) => [c, (d.sprocket_row?.[c] ?? '').toString()])) as SprocketCsvRow
+  return { ...base, ...CLUB, ClubCalendarEventID: d.club_calendar_event_id, DeleteEvent: 'Yes', SavedBy: '', SavedOn: '' }
+}

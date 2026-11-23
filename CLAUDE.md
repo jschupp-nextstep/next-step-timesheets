@@ -189,7 +189,7 @@ type on either side — it exists purely as the rate-lookup fallback target.
 | 6 (not originally scoped) | Pay-period logging windows + payment claims review queue | ✅ Done, deployed 2026-09-27 — see "Pay-period logging windows" below |
 | 7 (not originally scoped) | Native bulk importer for events/event_assignments | ✅ Done, deployed 2026-09-27 — see "Native bulk importer" below |
 | 8 (payroll lessons, Oct 2026) | R1–R9 from the Sep 1–Oct 6 Sheets payroll run — see "Payroll lessons" below | 🟡 Payment Due date range + R1 cutover done 2026-10-12; R2 done 2026-10-13 (R2a roles, R2b logged quick actions, R2c review queue + payroll hold, R2d swap-with-replacement); R3 paid-time rules done 2026-10-13; R8 minimal (paid rate/amount saved at payment) done 2026-10-13; R4 entry flags + coach questions done 2026-10-14; R7 weekly-rate coaches done 2026-10-14; R5, R6, rest of R8, and R9 done 2026-10-14 (routine scheduler adds skip review; Luis's scheduler login deferred — Justin schedules AP himself for now) |
-| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; steps 1 (mappings, event fields, AP merge), 2 (session series), 3 (export of new rows), 4 (link IDs) and 5 (export changes) built 2026-11-22 — the winter must-haves; 6 (export files) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
+| 9 (after go-live) | App becomes the schedule's source of truth; Sprocket CSV export with change tracking | 🟡 Designed 2026-11-22; steps 1 (mappings, event fields, AP merge), 2 (session series), 3 (export of new rows), 4 (link IDs) and 5 (export changes) built 2026-11-22 — the winter must-haves; 6 (export files) and 7 (deletes) built 2026-11-22 — see "Phase 9" below. Target: scheduling live 1/1/2027 (winter futsal from 1/8, DSA winter, AP winter built in the app) |
 
 Rough effort estimate: Phases 0–2 (usable coach-facing app) ≈ 20–30 hours; full 0–4 ≈ 30–45
 hours. Justin has full summer runway, not a tight 2–3 week window.
@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0039`, applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0040` (0040 written 2026-11-22, not yet run), applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -543,6 +543,23 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   Download + Mark uploaded → held "link their IDs", file shows "3 new row(s) to link"; after linking
   → none to link. Session deleted; the two test file records (one discarded, one uploaded, dated
   11/22 19:51–19:52) remain — no API delete; Justin can remove them in SQL.
+
+### Step 7 built (2026-11-22, `0040_sprocket_deletes.sql`; run BEFORE pushing)
+- The app had **no delete** before (only cancel). **`schedule_delete_event(event, reason)`** —
+  admin only; refuses sessions with logged hours, claims or swap requests ("cancel it instead");
+  assignments and history go with it. "Delete session" (admins only) on the session page, with a
+  warning that cancelling is usually right.
+- **`sprocket_deletions`**: a `before delete` trigger on `events` (any delete path) notes each
+  linked Sprocket row (`pending`), and each never-linked row that was in an uploaded file
+  (`manual` — no ID; "Delete by hand in Sprocket" list with Done → `done`). Reason from the
+  transaction setting `app.delete_reason`.
+- **Export to Sprocket** ("New and changed"): pending deletes go in every file regardless of date
+  range, as Sprocket's own row + `DeleteEvent=Yes` (`deleteRow()`), listed under "Deleted here".
+  7-argument **`sprocket_create_batch(..., p_deletes)`** (the 6-arg one from 0039 is left in place,
+  unused); `sprocket_export_batch_deletions`; `deleted_rows` on files; marking a file uploaded sets
+  its deletes `sent`. A delete in a waiting file isn't put in another.
+- **Importer** skips a Sprocket row whose IDs were all deleted here ("Deleted in this app"), so a
+  deleted session doesn't come back.
 
 ### AP back-to-back rule built (2026-11-22, no migration)
 - `paidEarlyMinutes()` (`src/utils/hours.ts`) caps early minutes at the gap since the coach's

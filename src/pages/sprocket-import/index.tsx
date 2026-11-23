@@ -188,6 +188,8 @@ export const SprocketImport = () => {
   // Export to Sprocket file uploaded, IDs not linked yet): never created
   // again as new sessions.
   const [unlinkedAppIds, setUnlinkedAppIds] = useState<Set<string>>(new Set())
+  // Sprocket IDs of sessions deleted in this app (0040) -- never re-created.
+  const [deletedHereIds, setDeletedHereIds] = useState<Set<string>>(new Set())
   const [matchError, setMatchError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   // Shown in place of the mapping screen while the import runs (Justin: the
@@ -380,6 +382,20 @@ export const SprocketImport = () => {
     }
     setUnlinkedAppIds(unlinked)
 
+    const deletedHere = new Set<string>()
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data, error } = await supabaseClient
+        .from('sprocket_deletions')
+        .select('club_calendar_event_id')
+        .in('club_calendar_event_id', ids.slice(i, i + 150))
+      if (error) {
+        setMatchError(error.message)
+        break
+      }
+      for (const d of data ?? []) if (d.club_calendar_event_id) deletedHere.add(d.club_calendar_event_id)
+    }
+    setDeletedHereIds(deletedHere)
+
     return false // prevent antd Upload from actually uploading anywhere
   }
 
@@ -524,6 +540,10 @@ export const SprocketImport = () => {
         const existingId = event.sprocketIds.map((id) => existingBySprocketId.get(id)).find(Boolean)
         if (existingId && appManagedEventIds.has(existingId)) {
           eventsManagedHere += 1
+          continue
+        }
+        if (!existingId && event.sprocketIds.length > 0 && event.sprocketIds.every((id) => deletedHereIds.has(id))) {
+          recordIgnored(event, 'Deleted in this app (the delete goes to Sprocket with Export to Sprocket)')
           continue
         }
         if (!existingId && event.sprocketIds.some((id) => unlinkedAppIds.has(id))) {

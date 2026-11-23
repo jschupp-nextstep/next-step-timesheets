@@ -18,6 +18,7 @@ type Batch = {
   range_to: string
   new_rows: number
   changed_rows: number
+  deleted_rows?: number
   status: 'waiting_upload' | 'uploaded' | 'abandoned'
   decided_by_email: string | null
   decided_at: string | null
@@ -52,7 +53,7 @@ export const ExportHistory = ({ refreshKey }: { refreshKey: number }) => {
     const [b, rows] = await Promise.all([
       supabaseClient
         .from('sprocket_export_batches')
-        .select('id, created_at, created_by_email, mode, range_from, range_to, new_rows, changed_rows, status, decided_by_email, decided_at')
+        .select('id, created_at, created_by_email, mode, range_from, range_to, new_rows, changed_rows, deleted_rows, status, decided_by_email, decided_at')
         .order('created_at', { ascending: false })
         .limit(30),
       supabaseClient
@@ -120,7 +121,9 @@ export const ExportHistory = ({ refreshKey }: { refreshKey: number }) => {
           />
           <Table.Column
             title="Rows"
-            render={(_, b: Batch) => [b.new_rows && `${b.new_rows} new`, b.changed_rows && `${b.changed_rows} changed`].filter(Boolean).join(', ')}
+            render={(_, b: Batch) => [b.new_rows && `${b.new_rows} new`, b.changed_rows && `${b.changed_rows} changed`, b.deleted_rows && `${b.deleted_rows} deleted`]
+                .filter(Boolean)
+                .join(', ')}
           />
           <Table.Column
             title="Status"
