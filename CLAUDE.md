@@ -228,7 +228,7 @@ until the push landed. Practical checklist before handing over a migration:
 Phases 0–4 are complete and deployed (GitHub Actions → GitHub Pages on every push to `main`).
 The app is in real use: admin CRUD for all reference data, coach login (magic link + password) and
 self-service session logging/editing, a Sprocket calendar importer, Reconciliation, Payment Due,
-and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0039` (0039 written 2026-11-22, not yet run), applied
+and a combined Zoho Books export. Full schema is in `supabase/migrations/0001`–`0039`, applied
 manually via the Supabase SQL Editor (no working Supabase CLI auth as of this session — a
 migration file existing here doesn't guarantee nothing else was changed directly in the dashboard,
 worth a spot-check if that's ever suspected).
@@ -523,7 +523,7 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   Deleted afterward.
 - Assumes Sprocket updates by ClubCalendarEventID — **unconfirmed until Justin's one-row test**.
 
-### Step 6 built (2026-11-22, `0039_sprocket_export_batches.sql`; run BEFORE pushing)
+### Step 6 built (2026-11-22, `0039_sprocket_export_batches.sql`, run and deployed 2026-11-22)
 - **`sprocket_export_batches`** (who, when, mode, range, programs, the CSV, new/changed counts,
   status `waiting_upload` → `uploaded` | `abandoned`, who decided) + **`sprocket_export_batch_rows`**
   (row, `new`/`change`, exact `sent_row`). Admin-read only.
@@ -537,6 +537,12 @@ timesheet go-live first, build in December. Order of work and cut list at the en
 - **Export files** card (`ExportHistory.tsx`) on the page: last 30 files, Download again, Mark
   uploaded, Discard, and for uploaded files "N new row(s) to link → Link Sprocket IDs".
 - Still admin-only (design allowed schedulers for their own programs — not built).
+- Verified 2026-11-22 on the page with a temporary session (browser download intercepted): Download
+  → file "Waiting for upload"; re-check → "1 new session left out: already in an export file";
+  `sprocket_create_batch` with the same rows → refused; Discard → rows free (3 new again);
+  Download + Mark uploaded → held "link their IDs", file shows "3 new row(s) to link"; after linking
+  → none to link. Session deleted; the two test file records (one discarded, one uploaded, dated
+  11/22 19:51–19:52) remain — no API delete; Justin can remove them in SQL.
 
 ### AP back-to-back rule built (2026-11-22, no migration)
 - `paidEarlyMinutes()` (`src/utils/hours.ts`) caps early minutes at the gap since the coach's
