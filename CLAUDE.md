@@ -563,10 +563,7 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   series are saved this way). A Club session produces exactly one row, keyed by the session itself.
 - **AP split sessions** (Jr. Academy 6:30, others 7:30) are two app sessions; a coach on both is
   paid for both. **The AP +15 min applies only to the first session of a back-to-back block for the
-  same coach at the same location**; the second pays from its scheduled start. (Today the +15 is a
-  flat per-program rule — this needs a "previous session for this coach ends when this one starts,
-  same location" check where paid time is computed: `paidWindow()` in `src/utils/hours.ts`, used by
-  Confirm hours, corrections, claim approval and the review-queue stale check.)
+  same coach at the same location**; the second pays from its scheduled start. (Built 2026-11-22 — see "AP back-to-back rule built" above.)
 - **Winter already in Sprocket** (`Winter Calendar.csv`, gitignored; export of 1/1 onward, 97
   rows): DSA winter at Sluggers (ProgramID 20285, team IDs 101901/02/04/05/06/07/09, coaches in
   Notes; Saturdays 1/9–3/13, none 1/16) — **the pattern for team rows**; futsal as Club rows at
