@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { minutesBefore, paidWindow, resolveEventHours } from './hours'
+import { minutesBefore, paidEarlyMinutes, paidWindow, resolveEventHours } from './hours'
 
 const ap = { name: 'Annual Program', paid_early_minutes: 15 }
 const town = { name: 'Town Session', paid_early_minutes: 0 }
@@ -44,5 +44,32 @@ describe('paid-time rules (R3)', () => {
   it('subtracts minutes across the hour and never wraps past midnight', () => {
     expect(minutesBefore('17:05:00', 15)).toBe('16:50:00')
     expect(minutesBefore('00:10', 15)).toBe('00:00:00')
+  })
+})
+
+describe('AP back-to-back (only the first session of a block gets the early minutes)', () => {
+  const ap = { name: 'Annual Program', paid_early_minutes: 15 }
+  const jr = { start_time: '18:30:00', end_time: '19:30:00' }
+  const older = { start_time: '19:30:00', end_time: '20:30:00' }
+
+  it('pays the first session from 15 early', () => {
+    expect(paidWindow(ap, { ...jr, coach_previous_end: null })).toMatchObject({ start: '18:15:00', earlyMinutes: 15 })
+    expect(resolveEventHours(ap, jr, undefined)).toBe(1.25)
+  })
+
+  it('pays the next session from its scheduled start when it follows straight on', () => {
+    expect(paidWindow(ap, { ...older, coach_previous_end: '19:30:00' })).toMatchObject({ start: '19:30:00', earlyMinutes: 0 })
+    expect(resolveEventHours(ap, { ...older, coach_previous_end: '19:30:00' }, undefined)).toBe(1)
+  })
+
+  it('pays only the gap after a short break, and nothing early into an overlap', () => {
+    expect(paidEarlyMinutes(ap, { ...older, coach_previous_end: '19:20:00' })).toBe(10)
+    expect(paidEarlyMinutes(ap, { ...older, coach_previous_end: '19:45:00' })).toBe(0)
+    expect(paidEarlyMinutes(ap, { ...older, coach_previous_end: '18:00:00' })).toBe(15)
+  })
+
+  it('also caps a game warm-up the same way', () => {
+    const game = { start_time: '10:00:00', end_time: '11:00:00', paid_early_minutes: 30 }
+    expect(paidEarlyMinutes({ name: 'Town Session' }, { ...game, coach_previous_end: '09:45:00' })).toBe(15)
   })
 })

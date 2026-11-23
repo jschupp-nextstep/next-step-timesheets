@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useList } from '@refinedev/core'
 import { Alert, App, Button, Card, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd'
 import dayjs from 'dayjs'
@@ -8,10 +8,12 @@ import { supabaseClient } from '../../utility/supabaseClient'
 import { useScheduleAction } from '../../utility/scheduleActions'
 import { describeChange, formatTimeRange, type ScheduleChangeRow } from '../../utility/scheduleChanges'
 import { paidWindow, resolveEventHours } from '../../utils/hours'
+import { loadCoachPreviousEnd } from '../../utility/coachPreviousSession'
 
 type ChangeWithEvent = ScheduleChangeRow & {
   events: {
     event_date: string
+    location_id: string
     start_time: string | null
     end_time: string | null
     session_name: string | null
@@ -51,7 +53,7 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
     resource: 'schedule_changes',
     meta: {
       select:
-        '*, events(event_date, start_time, end_time, session_name, is_cancelled, paid_early_minutes, programs(name), locations(name, half_day_hours, full_day_hours))',
+        '*, events(event_date, location_id, start_time, end_time, session_name, is_cancelled, paid_early_minutes, programs(name), locations(name, half_day_hours, full_day_hours))',
     },
     filters: [{ field: 'review_status', operator: 'eq', value: 'needs_review' }],
     sorters: [{ field: 'changed_at', order: 'asc' }],
@@ -106,6 +108,34 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
     return map
   }, [assignmentsResult?.data])
 
+  // AP back-to-back: each entry's coach's previous session there that day
+  // (entry id -> its end, or null). An entry missing here isn't checked yet,
+  // so the "now worth" flag waits rather than guessing.
+  const [previousEnds, setPreviousEnds] = useState<Map<string, string | null>>(new Map())
+  useEffect(() => {
+    const events = new Map(groups.map((g) => [g.eventId, g.event]))
+    const entries = entriesResult?.data ?? []
+    let cancelled = false
+    Promise.all(
+      entries.map(async (e) => {
+        const ev = events.get(e.event_id)
+        if (!ev) return [e.id, null] as const
+        try {
+          return [e.id, await loadCoachPreviousEnd(e.coach_id, { id: e.event_id, event_date: ev.event_date, location_id: ev.location_id, start_time: ev.start_time })] as const
+        } catch {
+          return null
+        }
+      }),
+    ).then((pairs) => {
+      if (!cancelled) setPreviousEnds(new Map(pairs.filter((p): p is readonly [string, string | null] => !!p)))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [groups, entriesResult?.data])
+  const eventForEntry = (entry: AffectedEntry, group: EventGroup) =>
+    group.event ? { ...group.event, coach_previous_end: previousEnds.get(entry.id) ?? null } : null
+
   const refetchAll = () => {
     query.refetch()
     entriesQuery.refetch()
@@ -137,7 +167,7 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
         .from('timesheet_entries')
         .update({
           hours,
-          start_time: group.event ? paidWindow(entry.programs ?? { name: '' }, group.event).start : null,
+          start_time: group.event ? paidWindow(entry.programs ?? { name: '' }, eventForEntry(entry, group)!).start : null,
           end_time: group.event?.end_time ?? null,
         })
         .eq('id', entry.id)
@@ -164,8 +194,8 @@ export const ScheduleChangesCard = ({ onReviewed }: { onReviewed?: () => void })
             : 'Logged hours, then taken off this session. Entry kept -- edit or delete it in Timesheet Entries if they didn\'t work it.',
       })
     }
-    if (group.changes.some((c) => c.change_type === 'time') && group.event) {
-      const nowWorth = resolveEventHours(entry.programs ?? { name: '' }, group.event, group.event.locations ?? undefined)
+    if (group.changes.some((c) => c.change_type === 'time') && group.event && previousEnds.has(entry.id)) {
+      const nowWorth = resolveEventHours(entry.programs ?? { name: '' }, eventForEntry(entry, group)!, group.event.locations ?? undefined)
       if (nowWorth != null && entry.hours != null && Math.abs(nowWorth - entry.hours) > 0.001) {
         flags.push({
           text: `Recorded ${entry.hours.toFixed(2)} hrs; the session is now ${nowWorth.toFixed(2)} hrs.${entry.status === 'paid' ? ' Already paid at the old hours -- no clawback.' : ''}`,

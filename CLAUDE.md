@@ -523,6 +523,21 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   Deleted afterward.
 - Assumes Sprocket updates by ClubCalendarEventID — **unconfirmed until Justin's one-row test**.
 
+### AP back-to-back rule built (2026-11-22, no migration)
+- `paidEarlyMinutes()` (`src/utils/hours.ts`) caps early minutes at the gap since the coach's
+  previous session **that day at the same location** (`event.coach_previous_end`): straight after
+  it → paid from the scheduled start; 10-minute gap → 10 min; overlap → 0; first session → full
+  rule. Applies to any early minutes (AP's program rule and game warm-ups alike).
+- `loadCoachPreviousEnd(coach, event)` / `useCoachPreviousEnd()`
+  (`src/utility/coachPreviousSession.ts`): latest end among the coach's **assigned** sessions and
+  **logged** entries there that day that start earlier — so it doesn't matter which of two
+  back-to-back sessions is confirmed first. Used by Confirm hours / log a session and corrections
+  (hours stay blank and Submit disabled until it's loaded), claim approval, and the review queue's
+  "now worth" flag + "Update to N hrs" (flag waits until loaded). Entries confirmed earlier are not
+  recomputed (no AP entries had coaches at the time).
+- Verified 2026-11-22: temporary 6:30 and 7:30 AP sessions at Franklin with Taron on both → 1.25 and
+  1.00 hrs; a coach on only the 7:30 → 1.25. Deleted.
+
 ### What already exists (as of 2026-11-22)
 - `events`: program, location, date, start/end, `session_name` (= Sprocket Title), notes,
   `is_cancelled` + `cancellation_timing`, `series_id`, `paid_early_minutes` (**paid** time — not

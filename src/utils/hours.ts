@@ -17,7 +17,14 @@ export const FIXED_HOURS_FULL = new Set(['Camp-Full Day', 'Nurse-Full Day'])
 // Callers must pass the program record (not just its name) so the offset
 // can't be silently dropped.
 export type PaidTimeProgram = { name: string; paid_early_minutes?: number | null }
-export type PaidTimeEvent = { start_time: string | null; end_time: string | null; paid_early_minutes?: number | null }
+export type PaidTimeEvent = {
+  start_time: string | null
+  end_time: string | null
+  paid_early_minutes?: number | null
+  // When this coach's previous session that day at the same location ends
+  // (loadCoachPreviousEnd). Early minutes never reach back into it.
+  coach_previous_end?: string | null
+}
 type FixedHoursLocation = { half_day_hours: number | null; full_day_hours: number | null }
 
 const isFixedHours = (programName: string) => FIXED_HOURS_HALF.has(programName) || FIXED_HOURS_FULL.has(programName)
@@ -40,11 +47,25 @@ export function minutesBefore(time: string, minutes: number): string {
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}:${pad(Number(s))}`
 }
 
+const clockMinutes = (t: string) => {
+  const [h, m] = t.split(':')
+  return Number(h) * 60 + Number(m)
+}
+
 // Event override wins over the program rule; fixed-hours programs never
 // get early minutes (their pay doesn't come from a time span at all).
+//
+// Back-to-back (Justin, 2026-11-22): the early minutes go to the first
+// session of a coach's block at a location only. They never reach back into
+// the coach's previous session there -- right after it, the next session is
+// paid from its scheduled start; after a 10-minute gap, 10 minutes early.
 export function paidEarlyMinutes(program: PaidTimeProgram, event: PaidTimeEvent): number {
   if (isFixedHours(program.name)) return 0
-  const minutes = event.paid_early_minutes ?? program.paid_early_minutes ?? 0
+  let minutes = event.paid_early_minutes ?? program.paid_early_minutes ?? 0
+  if (minutes > 0 && event.coach_previous_end && event.start_time) {
+    const gap = clockMinutes(event.start_time) - clockMinutes(event.coach_previous_end)
+    minutes = Math.min(minutes, Math.max(0, gap))
+  }
   return minutes > 0 ? minutes : 0
 }
 

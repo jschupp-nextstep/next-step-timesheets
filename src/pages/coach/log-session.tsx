@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams } from 'react-router'
 import { supabaseClient } from '../../utility/supabaseClient'
 import { coachIdOf, isInactiveCoach, type Identity } from '../../providers/authProvider'
 import { FIXED_HOURS_HALF, FIXED_HOURS_FULL, paidWindow, timeSpanHours, resolveEventHours } from '../../utils/hours'
+import { useCoachPreviousEnd } from '../../utility/coachPreviousSession'
 import { computeBands, classifyDate, type PayPeriod } from '../../utils/payPeriods'
 import { isBeforeCutover, useAppSettings } from '../../utility/appSettings'
 import { BandCUnstructuredClaimForm } from './BandCUnstructuredClaimForm'
@@ -200,16 +201,23 @@ export const LogSession = () => {
     }
   }, [isEditMode, editEntry, programs])
 
+  // AP back-to-back: the early minutes stop at this coach's previous session
+  // there that day (src/utils/hours.ts).
+  const correctionPrevious = useCoachPreviousEnd(coachId, isCorrectionMode ? correctionEventResult : null)
+  const correctionEvent = correctionEventResult
+    ? { ...correctionEventResult, coach_previous_end: correctionPrevious.previousEnd }
+    : undefined
+
   useEffect(() => {
-    if (!isCorrectionMode || populatedRef.current || !correctionEventResult || !correctionProgramResult) return
+    if (!isCorrectionMode || populatedRef.current || !correctionEvent || !correctionProgramResult || !correctionPrevious.ready) return
     populatedRef.current = true
 
     // Default the proposal to the paid window (e.g. AP from 15 min early),
     // so an unchanged proposal matches what the session is already worth.
-    const window = paidWindow(correctionProgramResult, correctionEventResult)
+    const window = paidWindow(correctionProgramResult, correctionEvent)
     setCorrectionStart(window.start ? dayjs(`2000-01-01T${window.start}`) : null)
     setCorrectionEnd(window.end ? dayjs(`2000-01-01T${window.end}`) : null)
-  }, [isCorrectionMode, correctionEventResult, correctionProgramResult])
+  }, [isCorrectionMode, correctionEvent, correctionProgramResult, correctionPrevious.ready])
 
   const selectedProgram = programs.find((p) => p.id === programId)
   const isSessionMode = selectedProgram?.entry_mode === 'session'
@@ -291,12 +299,18 @@ export const LogSession = () => {
     [pickerEvents, locationId],
   )
 
-  const selectedEvent = pickerEvents.find((e) => e.id === eventId)
+  const pickedEvent = pickerEvents.find((e) => e.id === eventId)
+  // AP back-to-back: early minutes stop at the coach's previous session there.
+  const pickedPrevious = useCoachPreviousEnd(coachId, pickedEvent)
+  const selectedEvent = pickedEvent ? { ...pickedEvent, coach_previous_end: pickedPrevious.previousEnd } : undefined
   const selectedLocation = locationId ? locationsById.get(locationId) : undefined
   const resolvedHours =
-    selectedProgram && selectedEvent ? resolveEventHours(selectedProgram, selectedEvent, selectedLocation) : null
+    selectedProgram && selectedEvent && pickedPrevious.ready
+      ? resolveEventHours(selectedProgram, selectedEvent, selectedLocation)
+      : null
   // Entries record the paid window (R3), so start/end agree with hours.
-  const selectedWindow = selectedProgram && selectedEvent ? paidWindow(selectedProgram, selectedEvent) : null
+  const selectedWindow =
+    selectedProgram && selectedEvent && pickedPrevious.ready ? paidWindow(selectedProgram, selectedEvent) : null
   const otherHours = timeSpanHours(
     otherStart?.format('HH:mm:ss') ?? null,
     otherEnd?.format('HH:mm:ss') ?? null,
@@ -466,12 +480,8 @@ export const LogSession = () => {
     ? FIXED_HOURS_HALF.has(correctionProgramResult.name) || FIXED_HOURS_FULL.has(correctionProgramResult.name)
     : false
   const correctionScheduledHours =
-    correctionEventResult && correctionProgramResult
-      ? resolveEventHours(
-          correctionProgramResult,
-          correctionEventResult,
-          locationsById.get(correctionEventResult.location_id),
-        )
+    correctionEvent && correctionProgramResult && correctionPrevious.ready
+      ? resolveEventHours(correctionProgramResult, correctionEvent, locationsById.get(correctionEvent.location_id))
       : null
   const correctionRequestedHours = isFixedHoursCorrection
     ? correctionHoursInput

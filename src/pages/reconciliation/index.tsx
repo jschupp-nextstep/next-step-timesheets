@@ -5,6 +5,7 @@ import { App, Button, Card, InputNumber, Modal, Segmented, Select, Space, Table,
 import { supabaseClient } from '../../utility/supabaseClient'
 import type { Identity } from '../../providers/authProvider'
 import { paidWindow, resolveEventHours } from '../../utils/hours'
+import { loadCoachPreviousEnd } from '../../utility/coachPreviousSession'
 import { useScheduleAction } from '../../utility/scheduleActions'
 import { ScheduleChangesCard } from './ScheduleChangesCard'
 import { DoublePayCard } from './DoublePayCard'
@@ -350,14 +351,31 @@ export const Reconciliation = () => {
             return
           }
           const program = claim.programs ?? { name: '', paid_early_minutes: null }
-          const hours = resolveEventHours(program, claim.events, claim.locations ?? undefined)
+          // AP back-to-back: no early minutes into this coach's previous
+          // session there that day.
+          let previousEnd: string | null
+          try {
+            previousEnd = claim.event_id
+              ? await loadCoachPreviousEnd(claim.coach_id, {
+                  id: claim.event_id,
+                  event_date: claim.events.event_date,
+                  location_id: claim.location_id,
+                  start_time: claim.events.start_time,
+                })
+              : null
+          } catch (e) {
+            message.error(`Couldn't check the coach's other sessions: ${(e as Error).message}`)
+            return
+          }
+          const claimEvent = { ...claim.events, coach_previous_end: previousEnd }
+          const hours = resolveEventHours(program, claimEvent, claim.locations ?? undefined)
           const { error: insertError } = await supabaseClient.from('timesheet_entries').insert({
             coach_id: claim.coach_id,
             program_id: claim.program_id,
             event_id: claim.event_id,
             location_id: claim.location_id,
             entry_date: claim.events.event_date,
-            start_time: paidWindow(program, claim.events).start,
+            start_time: paidWindow(program, claimEvent).start,
             end_time: claim.events.end_time,
             hours,
             session_name: claim.events.session_name,
