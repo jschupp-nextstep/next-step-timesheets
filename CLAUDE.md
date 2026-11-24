@@ -522,8 +522,11 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   the switch; "I've uploaded this file" → "Recorded 3"; re-check → nothing to send, 3 unchanged.
   Deleted afterward.
 - **Confirmed by Justin's one-row test (2026-11-24, ID 4198336):** an upload with the ID updates the
-  event in place (6:00 → 6:30, same ID, no duplicate) and `IsCancelled=Yes` cancels it. **`DeleteEvent=Yes`
-  did nothing** — the export afterward was identical, `SavedOn` unchanged (step 7 open; see below).
+  event in place (6:00 → 6:30, same ID, no duplicate) and `IsCancelled=Yes` cancels it. `DeleteEvent=Yes`
+  (Sprocket reported success) **removed it from the calendar** — though an export pulled right after
+  still listed the row unchanged, so Sprocket's export may lag or include deleted events (harmless:
+  the importer skips IDs deleted here, and Link Sprocket IDs skips known IDs). All three of update,
+  cancel and delete work as built.
 
 ### Step 6 built (2026-11-22, `0039_sprocket_export_batches.sql`, run and deployed 2026-11-22)
 - **`sprocket_export_batches`** (who, when, mode, range, programs, the CSV, new/changed counts,
@@ -679,7 +682,7 @@ automatically; editable per session.
   Sprocket's (logged admin change) or ignore (next export overwrites). Never automatic.
 
 ### Open questions / risks
-- The Sprocket one-row test decides whether update/cancel/delete by ID work as assumed.
+- ~~The Sprocket one-row test~~ — done 2026-11-24: update, cancel and delete by ID all work.
 - Who creates new Sprocket programs/teams for new seasons, and when (needed before export).
 - Weekly rates are per program, not per location: Prince's $1,100 and Hayley's $200 are set on
   **Town Session**, so any other Town Session they work is covered by the week too. Fine while
