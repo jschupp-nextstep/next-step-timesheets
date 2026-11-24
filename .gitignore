@@ -45,3 +45,6 @@ Master Calendar.xlsx
 Pay Rates *.xlsx
 Winter Calendar.csv
 sprocket-test/
+
+# Coach login emails (provisioning input)
+coach-emails*.csv

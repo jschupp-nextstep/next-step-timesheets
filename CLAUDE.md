@@ -579,6 +579,37 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   as TeamName). 0041 keeps the stored name in that case and restores names from stored raw rows.
   Same function signature; safe in either order with the code.
 
+### Step 8 built: compare mode (2026-11-24, `0043_sprocket_compare.sql`; run BEFORE pushing)
+- Justin wanted compare mode after all (2026-11-24): the backup for someone editing in Sprocket.
+- **Import Calendar no longer syncs sessions the app keeps** — `app_managed`, or dated on/after
+  `schedule_source_from` (before: only `app_managed` were skipped; post-switch imported sessions
+  would still have been synced). Their Sprocket rows in the file are compared with
+  `event_sprocket_rows.sprocket_row` (`findSprocketChanges()` in `src/utility/sprocketCompare.ts`,
+  tested; dates/times/yes-no normalized), rows matching an export file still *Waiting for upload*
+  are counted separately ("mark that file uploaded"). Differences → **"Changed in Sprocket"** card
+  (`CompareCard.tsx`), decided per session, immediately:
+  - **Take Sprocket's** → `sprocket_take_event(event, snapshot, rows, ids)`: date/times, cancelled,
+    location (not to Location TBD), name (one-row non-game only), coaches (only when every Notes
+    name is mapped — `coaches_complete`), private/opponent/away/arrival/field; logged admin changes,
+    reason "Taken from Sprocket"; then stores Sprocket's rows (all of the session's rows,
+    `mergedRows()`, so rows missing from the file aren't dropped by the 0035 trigger).
+  - **Keep the app's** → `sprocket_keep_app(event, rows, sprocket_coach_ids)`: records Sprocket's
+    rows as `sprocket_row` (and Sprocket's coach set in the snapshot), so Export to Sprocket lists
+    the session and sends the app's version back.
+- Known gap: a title edited in Sprocket on an *imported* (not app-made) session isn't sent back on
+  Keep (export only writes Title for app-managed sessions).
+
+### Weekly rates by location (2026-11-24, `0042_weekly_rate_locations.sql`; run BEFORE pushing)
+- Justin: a weekly-rate coach may fill in elsewhere. `weekly_rates.location_id` (null = any). A rate
+  covers an entry when coach, dates, program (if set) and location (if set) match; most specific
+  wins (program+location > program > location > all work) — `weeklyRateFor()`, tested.
+  `attach_weekly_entries_internal` checks location too. Form/list/Payment Due/coach page show
+  "Town Session at Dedham". **Prince's and Hayley's rates still need their location set** on Weekly
+  Rates after 0042 runs (Justin to confirm which locations).
+- Guides updated 2026-11-24 for Phase 9 (Admin: routine, sending to Sprocket, Changed in Sprocket,
+  Delete session, Sprocket Mappings, switch checklist; Scheduler: schedule lives here from 1/1, series
+  form; Coach: AP back-to-back).
+
 ### AP back-to-back rule built (2026-11-22, no migration)
 - `paidEarlyMinutes()` (`src/utils/hours.ts`) caps early minutes at the gap since the coach's
   previous session **that day at the same location** (`event.coach_previous_end`): straight after
