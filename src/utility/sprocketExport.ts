@@ -242,7 +242,7 @@ export function buildNewRows(
 
 // Fields compared to decide whether a row changed, with how they're named
 // to a person.
-const COMPARED: [keyof SprocketCsvRow, string][] = [
+export const COMPARED: [keyof SprocketCsvRow, string][] = [
   ['StartDate', 'date'],
   ['StartDateTime', 'start'],
   ['EndDateTime', 'end'],

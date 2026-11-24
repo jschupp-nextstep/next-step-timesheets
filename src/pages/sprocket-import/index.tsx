@@ -7,6 +7,9 @@ import { supabaseClient } from '../../utility/supabaseClient'
 import { checkImportFile } from '../../utility/importFileCheck'
 import { fileDateRange, planLinks } from '../../utility/sprocketLink'
 import { loadUnlinkedAppRows } from '../../utility/sprocketLinkData'
+import { useAppSettings } from '../../utility/appSettings'
+import { findSprocketChanges, mergedRows, type SprocketChange, type StoredRow } from '../../utility/sprocketCompare'
+import { CompareCard, type TakePayload } from './CompareCard'
 import {
   groupEventsByLocationBlock,
   parseSprocketCsv,
@@ -182,14 +185,20 @@ export const SprocketImport = () => {
   const [skippedRows, setSkippedRows] = useState<SkippedRow[]>([])
   // Sprocket row id -> our event id, for events imported before.
   const [existingBySprocketId, setExistingBySprocketId] = useState<Map<string, string>>(new Map())
-  // Sessions made in this app and linked (0037): never changed by an import.
-  const [appManagedEventIds, setAppManagedEventIds] = useState<Set<string>>(new Set())
+  // Sessions the app keeps (made here and linked -- 0037 -- or dated on/after
+  // the switch, 0038): never changed by an import; differences are listed
+  // for a decision instead (compare mode, 0043).
+  const [ownedEventIds, setOwnedEventIds] = useState<Set<string>>(new Set())
   // Sprocket rows that look like this app's own not-yet-linked rows (an
   // Export to Sprocket file uploaded, IDs not linked yet): never created
   // again as new sessions.
   const [unlinkedAppIds, setUnlinkedAppIds] = useState<Set<string>>(new Set())
   // Sprocket IDs of sessions deleted in this app (0040) -- never re-created.
   const [deletedHereIds, setDeletedHereIds] = useState<Set<string>>(new Set())
+  const [storedRows, setStoredRows] = useState<StoredRow[]>([])
+  const [compare, setCompare] = useState<{ changes: SprocketChange[]; same: number; awaitingUpload: number } | null>(null)
+  const { settings } = useAppSettings()
+  const scheduleSourceFrom = settings?.schedule_source_from ?? null
   const [matchError, setMatchError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   // Shown in place of the mapping screen while the import runs (Justin: the
@@ -366,7 +375,7 @@ export const SprocketImport = () => {
     for (let i = 0; i < ids.length; i += 150) {
       const { data, error } = await supabaseClient
         .from('events')
-        .select('id, sprocket_event_ids, app_managed')
+        .select('id, sprocket_event_ids, app_managed, event_date')
         .overlaps('sprocket_event_ids', ids.slice(i, i + 150))
       if (error) {
         setMatchError(error.message)
@@ -374,11 +383,47 @@ export const SprocketImport = () => {
       }
       for (const row of data ?? []) {
         for (const id of row.sprocket_event_ids ?? []) found.set(id, row.id)
-        if (row.app_managed) managed.add(row.id)
+        if (row.app_managed || (scheduleSourceFrom && row.event_date >= scheduleSourceFrom)) managed.add(row.id)
       }
     }
     setExistingBySprocketId(found)
-    setAppManagedEventIds(managed)
+    setOwnedEventIds(managed)
+
+    // Compare mode: Sprocket's rows for those sessions vs what the app last
+    // sent or saw.
+    const ownedIds = [...managed]
+    const stored: StoredRow[] = []
+    const waiting = new Map<string, Record<string, string>[]>()
+    for (let i = 0; i < ownedIds.length; i += 150) {
+      const { data, error } = await supabaseClient
+        .from('event_sprocket_rows')
+        .select('id, event_id, club_calendar_event_id, state, sprocket_row')
+        .in('event_id', ownedIds.slice(i, i + 150))
+      if (error) {
+        setMatchError(error.message)
+        break
+      }
+      stored.push(...((data ?? []) as StoredRow[]))
+    }
+    const clubIdByRow = new Map(stored.map((r) => [r.id, r.club_calendar_event_id]))
+    const storedIds = stored.map((r) => r.id)
+    for (let i = 0; i < storedIds.length; i += 150) {
+      const { data, error } = await supabaseClient
+        .from('sprocket_export_batch_rows')
+        .select('row_id, sent_row, sprocket_export_batches!inner(status)')
+        .eq('sprocket_export_batches.status', 'waiting_upload')
+        .in('row_id', storedIds.slice(i, i + 150))
+      if (error) {
+        setMatchError(error.message)
+        break
+      }
+      for (const r of (data ?? []) as { row_id: string; sent_row: Record<string, string> }[]) {
+        const id = clubIdByRow.get(r.row_id)
+        if (id) waiting.set(id, [...(waiting.get(id) ?? []), r.sent_row])
+      }
+    }
+    setStoredRows(stored)
+    setCompare(findSprocketChanges(events.flatMap((e) => e.rows), stored, managed, waiting))
 
     const rawRows = events.flatMap((e) => e.rows)
     const range = fileDateRange(rawRows)
@@ -549,7 +594,7 @@ export const SprocketImport = () => {
         }
 
         const existingId = event.sprocketIds.map((id) => existingBySprocketId.get(id)).find(Boolean)
-        if (existingId && appManagedEventIds.has(existingId)) {
+        if (existingId && ownedEventIds.has(existingId)) {
           eventsManagedHere += 1
           continue
         }
@@ -665,6 +710,39 @@ export const SprocketImport = () => {
     }
   }
 
+  // What "Take Sprocket's" sends for one changed session, from this file's
+  // parsed event and the mappings on this screen.
+  const buildTake = (change: SprocketChange): TakePayload | { error: string } => {
+    const ids = new Set(change.rows.map((r) => r.clubCalendarEventId))
+    const event = (parsed ?? []).find((e) => e.sprocketIds.some((id) => ids.has(id)))
+    if (!event) return { error: "Couldn't find this session in the file." }
+    const loc = locationMap[keyForEvent(event.locationName, event.eventDate)]
+    const named = event.needsTeamCoach ? [] : event.assignedCoachNames
+    const complete = !event.needsTeamCoach && named.every((n) => !!coachMap[n] && coachMap[n] !== LATER)
+    const coachIds = Array.from(new Set(realIds(named.map((n) => coachMap[n])))).sort()
+    const merged = mergedRows(storedRows, change.eventId, event.rows)
+    return {
+      snapshot: {
+        event_date: event.eventDate,
+        start_time: event.startTime,
+        end_time: event.endTime,
+        is_cancelled: event.isCancelled,
+        location_id: loc && loc !== IGNORE && loc !== LATER ? loc : null,
+        session_name: event.sessionName,
+        coach_ids: coachIds,
+        coaches_complete: complete,
+      },
+      rows: merged.rows,
+      ids: merged.ids,
+      sprocketCoachIds: complete ? coachIds : null,
+      note: complete
+        ? null
+        : event.needsTeamCoach
+          ? "Sprocket names no coach here, so the app's coaches were kept"
+          : 'some coach names in Sprocket aren\'t mapped above, so coaches were kept',
+    }
+  }
+
   return (
     <div>
       <Typography.Title level={3}>Import Sprocket Calendar</Typography.Title>
@@ -724,6 +802,16 @@ export const SprocketImport = () => {
               showIcon
               message={`${unlinkedAppIds.size} row(s) look like sessions made in this app whose Sprocket IDs aren't linked yet`}
               description="They won't be imported again (that would duplicate them). Upload this same file on Link Sprocket IDs to link them."
+            />
+          )}
+          {compare && compare.changes.length > 0 && <CompareCard changes={compare.changes} build={buildTake} />}
+          {compare && compare.awaitingUpload > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="info"
+              showIcon
+              message={`${compare.awaitingUpload} row(s) match an Export to Sprocket file still waiting for upload`}
+              description="Sprocket already has them -- mark that file uploaded on Export to Sprocket."
             />
           )}
           {deletedHereCount > 0 && (
@@ -997,7 +1085,7 @@ export const SprocketImport = () => {
                 <li>{summary.eventsCreated} events created</li>
                 <li>{summary.eventsUpdated} previously imported events updated from Sprocket</li>
                 {summary.eventsManagedHere > 0 && (
-                  <li>{summary.eventsManagedHere} sessions made in this app left as they are (scheduled here, not from Sprocket)</li>
+                  <li>{summary.eventsManagedHere} sessions kept in this app left as they are (any Sprocket changes are listed under "Changed in Sprocket")</li>
                 )}
                 <li>{summary.eventsUnchanged} previously imported events unchanged</li>
                 <li>{summary.eventsSkippedExisting} events already existed, skipped</li>
