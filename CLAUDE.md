@@ -521,7 +521,9 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   Export listed 3 changed rows tagged start/end with before/after, imported sessions excluded before
   the switch; "I've uploaded this file" → "Recorded 3"; re-check → nothing to send, 3 unchanged.
   Deleted afterward.
-- Assumes Sprocket updates by ClubCalendarEventID — **unconfirmed until Justin's one-row test**.
+- **Confirmed by Justin's one-row test (2026-11-24, ID 4198336):** an upload with the ID updates the
+  event in place (6:00 → 6:30, same ID, no duplicate) and `IsCancelled=Yes` cancels it. **`DeleteEvent=Yes`
+  did nothing** — the export afterward was identical, `SavedOn` unchanged (step 7 open; see below).
 
 ### Step 6 built (2026-11-22, `0039_sprocket_export_batches.sql`, run and deployed 2026-11-22)
 - **`sprocket_export_batches`** (who, when, mode, range, programs, the CSV, new/changed counts,
