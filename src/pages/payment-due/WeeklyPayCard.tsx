@@ -10,9 +10,10 @@ import {
   type WeekLine,
   type WeeklyPayment,
   type WeeklyRate,
+  weeklyCoverLabel,
 } from '../../utility/weeklyPay'
 
-export type WeeklyRateWithNames = WeeklyRate & { coaches: { name: string } | null; programs: { name: string } | null }
+export type WeeklyRateWithNames = WeeklyRate & { coaches: { name: string } | null; programs: { name: string } | null; locations?: { name: string } | null }
 type WeekEntry = { id: string; coach_id: string; program_id: string; entry_date: string; session_name: string | null }
 
 const fmtWeek = (start: string, end: string) => `${dayjs(start).format('ddd M/D')} – ${dayjs(end).format('ddd M/D')}`
@@ -43,7 +44,7 @@ export const WeeklyPayCard = ({
   const rateById = new Map(rates.map((r) => [r.id, r]))
   const label = (rateId: string) => {
     const r = rateById.get(rateId)
-    return r ? `${r.coaches?.name ?? '?'}${r.programs ? ` (${r.programs.name})` : ''}` : '?'
+    return r ? `${r.coaches?.name ?? '?'}${r.programs || r.locations ? ` (${weeklyCoverLabel(r.programs?.name, r.locations?.name)})` : ''}` : '?'
   }
 
   const openPay = (rateId: string, weekStart: string, entryIds: string[], advance: boolean) => {
@@ -237,7 +238,7 @@ export const WeeklyPaidHistory = ({
           title="Coach"
           render={(_, p: WeeklyPayment) => {
             const r = rateById.get(p.weekly_rate_id)
-            return r ? `${r.coaches?.name ?? '?'}${r.programs ? ` (${r.programs.name})` : ''}` : '?'
+            return r ? `${r.coaches?.name ?? '?'}${r.programs || r.locations ? ` (${weeklyCoverLabel(r.programs?.name, r.locations?.name)})` : ''}` : '?'
           }}
         />
         <Table.Column title="Week" render={(_, p: WeeklyPayment) => fmtWeek(p.week_start, p.week_end)} />

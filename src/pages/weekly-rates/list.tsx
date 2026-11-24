@@ -1,7 +1,7 @@
 import { EditButton, List, useTable } from '@refinedev/antd'
 import { Table, Tag } from 'antd'
 
-import { DOW_LABEL } from '../../utility/weeklyPay'
+import { DOW_LABEL, weeklyCoverLabel } from '../../utility/weeklyPay'
 
 type Row = {
   id: string
@@ -11,19 +11,22 @@ type Row = {
   effective_to: string | null
   coaches: { name: string } | null
   programs: { name: string } | null
+  locations: { name: string } | null
 }
 
 export const WeeklyRateList = () => {
   const { tableProps } = useTable<Row>({
     resource: 'weekly_rates',
-    meta: { select: '*, coaches(name), programs(name)' },
+    meta: { select: '*, coaches(name), programs(name), locations(name)' },
     sorters: { initial: [{ field: 'effective_from', order: 'desc' }] },
   })
   return (
     <List title="Weekly Rates">
       <Table {...tableProps} rowKey="id">
         <Table.Column title="Coach" render={(_, r: Row) => r.coaches?.name ?? '—'} />
-        <Table.Column title="Covers" render={(_, r: Row) => r.programs?.name ?? <Tag>All their work</Tag>} />
+        <Table.Column title="Covers" render={(_, r: Row) =>
+            r.programs || r.locations ? weeklyCoverLabel(r.programs?.name, r.locations?.name) : <Tag>All their work</Tag>
+          } />
         <Table.Column title="Amount" render={(_, r: Row) => `$${r.weekly_amount.toFixed(2)}/week`} />
         <Table.Column
           title="Week"

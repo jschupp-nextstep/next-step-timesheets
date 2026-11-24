@@ -177,7 +177,7 @@ export const PaymentDue = () => {
   // shown one line per coach-week instead (WeeklyPayCard).
   const { result: weeklyRatesResult } = useList<WeeklyRateWithNames>({
     resource: 'weekly_rates',
-    meta: { select: '*, coaches(name), programs(name)' },
+    meta: { select: '*, coaches(name), programs(name), locations(name)' },
     pagination: { pageSize: 200 },
   })
   const { result: weeklyPaymentsResult, query: weeklyPaymentsQuery } = useList<WeeklyPayment>({

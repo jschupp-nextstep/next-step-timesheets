@@ -10,6 +10,8 @@ export type WeeklyRate = {
   coach_id: string
   // null = covers all of the coach's work; otherwise just this program.
   program_id: string | null
+  // null/absent = any location; otherwise only this location (0042).
+  location_id?: string | null
   weekly_amount: number
   // 0 = Sunday ... 6 = Saturday (dayjs().day() convention).
   week_start_dow: number
@@ -27,7 +29,11 @@ export type WeeklyPayment = {
   paid_date: string
 }
 
-export type WeeklyEntry = { id: string; coach_id: string; program_id: string; entry_date: string }
+export type WeeklyEntry = { id: string; coach_id: string; program_id: string; entry_date: string; location_id?: string | null }
+
+// What a weekly rate covers, for labels: "Town Session at Dedham", "all work".
+export const weeklyCoverLabel = (program?: string | null, location?: string | null) =>
+  [program ?? (location ? 'all work' : null), location && `at ${location}`].filter(Boolean).join(' ') || 'all work'
 
 export const DOW_LABEL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -39,18 +45,22 @@ export function weekStartFor(date: string, dow: number): string {
 
 export const weekEndFor = (weekStart: string) => dayjs(weekStart).add(6, 'day').format('YYYY-MM-DD')
 
-// The weekly rate that covers an entry, if any. A program-specific rate
-// beats an all-work rate for the same coach; only rates in effect on the
-// entry's date count.
+// The weekly rate that covers an entry, if any. Only rates in effect on the
+// entry's date whose program and location (when set) match count; the most
+// specific wins: program + location, then program, then location, then an
+// all-work rate.
 export function weeklyRateFor<E extends WeeklyEntry>(entry: E, rates: WeeklyRate[]): WeeklyRate | undefined {
-  const inEffect = rates.filter(
-    (r) =>
-      r.coach_id === entry.coach_id &&
-      entry.entry_date >= r.effective_from &&
-      (!r.effective_to || entry.entry_date <= r.effective_to) &&
-      (r.program_id === null || r.program_id === entry.program_id),
-  )
-  return inEffect.find((r) => r.program_id !== null) ?? inEffect.find((r) => r.program_id === null)
+  const score = (r: WeeklyRate) => (r.program_id ? 2 : 0) + (r.location_id ? 1 : 0)
+  return rates
+    .filter(
+      (r) =>
+        r.coach_id === entry.coach_id &&
+        entry.entry_date >= r.effective_from &&
+        (!r.effective_to || entry.entry_date <= r.effective_to) &&
+        (r.program_id === null || r.program_id === entry.program_id) &&
+        (!r.location_id || r.location_id === entry.location_id),
+    )
+    .sort((a, b) => score(b) - score(a))[0]
 }
 
 export type WeekLine<E> = {

@@ -22,6 +22,7 @@ import { Link, useParams } from 'react-router'
 import { ChangeRateModal, type ChangingRate } from '../../components/ChangeRateModal'
 import { currentRate, type RateRef } from '../../utility/coachRateImport'
 import { supabaseClient } from '../../utility/supabaseClient'
+import { weeklyCoverLabel } from '../../utility/weeklyPay'
 import { STAFF_TYPE_COLOR, STAFF_TYPE_LABEL, type StaffType } from '../../utility/staffType'
 
 type Coach = { id: string; name: string; initials: string; email: string | null; pay_type: '1099' | 'w2'; is_active: boolean; staff_type: StaffType }
@@ -34,6 +35,7 @@ type Weekly = {
   effective_from: string
   effective_to: string | null
   program: { name: string } | null
+  location: { name: string } | null
 }
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -70,7 +72,7 @@ export const CoachShow = () => {
   })
   const { result: weeklyResult } = useList<Weekly>({
     resource: 'weekly_rates',
-    meta: { select: 'id, weekly_amount, week_start_dow, effective_from, effective_to, program:programs(name)' },
+    meta: { select: 'id, weekly_amount, week_start_dow, effective_from, effective_to, program:programs(name), location:locations(name)' },
     filters: [{ field: 'coach_id', operator: 'eq', value: id }],
   })
 
@@ -280,7 +282,7 @@ export const CoachShow = () => {
           ))}
           {(weeklyResult?.data ?? []).map((w) => (
             <div key={w.id} style={{ marginBottom: 8 }}>
-              <strong>Weekly:</strong> {money(w.weekly_amount)} per week ({w.program?.name ?? 'all work'}, weeks start{' '}
+              <strong>Weekly:</strong> {money(w.weekly_amount)} per week ({weeklyCoverLabel(w.program?.name, w.location?.name)}, weeks start{' '}
               {DOW[w.week_start_dow]}) · {span(w.effective_from, w.effective_to)} · <Link to={`/weekly-rates/edit/${w.id}`}>Edit</Link>
             </div>
           ))}

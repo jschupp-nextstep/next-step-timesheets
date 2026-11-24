@@ -21,6 +21,14 @@ export const WeeklyRateForm = ({ formProps }: { formProps: FormProps }) => {
     pagination: { pageSize: 100 },
   })
 
+  const { selectProps: locationSelectProps } = useSelect({
+    resource: 'locations',
+    optionLabel: 'name',
+    optionValue: 'id',
+    sorters: [{ field: 'name', order: 'asc' }],
+    pagination: { pageSize: 300 },
+  })
+
   return (
     <Form {...formProps} layout="vertical" style={{ maxWidth: 520 }}>
       <Form.Item label="Coach" name="coach_id" rules={[{ required: true }]}>
@@ -32,6 +40,13 @@ export const WeeklyRateForm = ({ formProps }: { formProps: FormProps }) => {
         extra="Leave empty for all of this coach's work. Pick a program to cover only that; their other programs stay hourly."
       >
         <Select options={programSelectProps.options} allowClear placeholder="All their work" showSearch optionFilterProp="label" />
+      </Form.Item>
+      <Form.Item
+        label="At location"
+        name="location_id"
+        extra="Leave empty for any location. Pick one to cover only sessions there -- a fill-in somewhere else stays hourly."
+      >
+        <Select options={locationSelectProps.options} allowClear placeholder="Any location" showSearch optionFilterProp="label" />
       </Form.Item>
       <Form.Item label="Weekly amount" name="weekly_amount" rules={[{ required: true }]}>
         <InputNumber min={0.01} step={50} style={{ width: '100%' }} addonBefore="$" addonAfter="/week" />

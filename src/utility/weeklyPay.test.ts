@@ -86,3 +86,31 @@ describe('splitWeekly', () => {
     expect(weeks[0].payment?.id).toBe('p1')
   })
 })
+
+describe('weeklyRateFor with a location', () => {
+  const dedham: WeeklyRate = { ...prince, id: 'prince-town-dedham', program_id: 'town', location_id: 'dedham' }
+  const le = (id: string, program_id: string, location_id: string | null) => ({ ...e(id, 'prince', program_id, '2026-12-05'), location_id })
+
+  it('covers only sessions at that location', () => {
+    expect(weeklyRateFor(le('1', 'town', 'dedham'), [dedham])).toBe(dedham)
+    expect(weeklyRateFor(le('2', 'town', 'natick'), [dedham])).toBeUndefined() // a fill-in elsewhere stays hourly
+    expect(weeklyRateFor(le('3', 'town', null), [dedham])).toBeUndefined()
+    expect(weeklyRateFor(le('4', 'ap', 'dedham'), [dedham])).toBeUndefined()
+  })
+
+  it('prefers the most specific rate', () => {
+    const town: WeeklyRate = { ...prince, id: 'prince-town', program_id: 'town' }
+    const atDedham: WeeklyRate = { ...prince, id: 'prince-dedham', location_id: 'dedham' }
+    expect(weeklyRateFor(le('5', 'town', 'dedham'), [prince, town, atDedham, dedham])).toBe(dedham)
+    expect(weeklyRateFor(le('6', 'town', 'natick'), [prince, town, atDedham, dedham])).toBe(town)
+    expect(weeklyRateFor(le('7', 'ap', 'dedham'), [prince, town, atDedham, dedham])).toBe(atDedham)
+    expect(weeklyRateFor(le('8', 'ap', 'natick'), [prince, town, atDedham, dedham])).toBe(prince)
+  })
+
+  it('splits a week: Dedham sessions to the week, a fill-in elsewhere to hourly', () => {
+    const { hourly, weeks } = splitWeekly([le('a', 'town', 'dedham'), le('b', 'town', 'natick')], [dedham], [])
+    expect(hourly.map((x) => x.id)).toEqual(['b'])
+    expect(weeks).toHaveLength(1)
+    expect(weeks[0].entries.map((x) => x.id)).toEqual(['a'])
+  })
+})
