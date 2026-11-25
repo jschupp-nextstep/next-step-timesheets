@@ -250,6 +250,11 @@ export const SprocketImport = () => {
     () => (parsed ?? []).filter((e) => e.sprocketIds.some((id) => existingBySprocketId.has(id))).length,
     [parsed, existingBySprocketId],
   )
+  const ownedMatchedCount = useMemo(
+    () =>
+      (parsed ?? []).filter((e) => e.sprocketIds.some((id) => ownedEventIds.has(existingBySprocketId.get(id) ?? ''))).length,
+    [parsed, existingBySprocketId, ownedEventIds],
+  )
   // Sessions deleted here (0040): skipped on import, so not "new".
   const deletedHereCount = useMemo(
     () =>
@@ -791,7 +796,11 @@ export const SprocketImport = () => {
             message={`${parsed.length} events found, referencing ${distinctProgramNames.length + (hasCampEvents ? 1 : 0)} program name(s), ${locationBlocks.length} location/date block(s), and ${distinctCoachNames.length} coach name(s).`}
             description={
               matchedCount > 0
-                ? `${matchedCount} of them were imported before (matched by Sprocket's event ID) and will only change where Sprocket changed something since; ${parsed.length - matchedCount - deletedHereCount} are new.`
+                ? `${matchedCount} of them were imported before (matched by Sprocket's event ID)${
+                    ownedMatchedCount > 0
+                      ? `; ${ownedMatchedCount} of those are kept in this app and won't change (see Changed in Sprocket)`
+                      : ''
+                  }; the rest change only where Sprocket changed something since. ${parsed.length - matchedCount - deletedHereCount} are new.`
                 : `None of these were imported before -- all ${parsed.length - deletedHereCount} are new.`
             }
           />

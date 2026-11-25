@@ -596,6 +596,15 @@ timesheet go-live first, build in December. Order of work and cut list at the en
   - **Keep the app's** → `sprocket_keep_app(event, rows, sprocket_coach_ids)`: records Sprocket's
     rows as `sprocket_row` (and Sprocket's coach set in the snapshot), so Export to Sprocket lists
     the session and sends the app's version back.
+- Verified live 2026-11-24 with a temporary AP session (linked with made-up IDs 999000401–403):
+  a file moving it 6:00 → 6:30 → "Changed in Sprocket (1)" tagged start/end with all 3 rows; Keep →
+  app unchanged, stored rows 6:30, Export listed 3 rows back to 6:00; a file at 7:00 with "Coaches:
+  Taron Mills" → Take → 19:00–20:00, Taron added (source sprocket), history "Taken from Sprocket"
+  (reviewed), 3 rows still linked, Export "3 unchanged". Cleanup: session deleted, its 3 deletes
+  sent through a test export file marked uploaded (test records remain, like earlier steps).
+- **Type-check gotcha (2026-11-24):** `npx tsc --noEmit -p .` checks nothing (root tsconfig has
+  `files: []` + references). Use `npx tsc -b` or `npm run build`. A duplicate `const stored` in the
+  importer got pushed past it and failed the deploy (live site stayed on the previous version).
 - Known gap: a title edited in Sprocket on an *imported* (not app-made) session isn't sent back on
   Keep (export only writes Title for app-managed sessions).
 
