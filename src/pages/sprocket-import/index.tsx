@@ -392,7 +392,7 @@ export const SprocketImport = () => {
     // Compare mode: Sprocket's rows for those sessions vs what the app last
     // sent or saw.
     const ownedIds = [...managed]
-    const stored: StoredRow[] = []
+    const ownedRows: StoredRow[] = []
     const waiting = new Map<string, Record<string, string>[]>()
     for (let i = 0; i < ownedIds.length; i += 150) {
       const { data, error } = await supabaseClient
@@ -403,10 +403,10 @@ export const SprocketImport = () => {
         setMatchError(error.message)
         break
       }
-      stored.push(...((data ?? []) as StoredRow[]))
+      ownedRows.push(...((data ?? []) as StoredRow[]))
     }
-    const clubIdByRow = new Map(stored.map((r) => [r.id, r.club_calendar_event_id]))
-    const storedIds = stored.map((r) => r.id)
+    const clubIdByRow = new Map(ownedRows.map((r) => [r.id, r.club_calendar_event_id]))
+    const storedIds = ownedRows.map((r) => r.id)
     for (let i = 0; i < storedIds.length; i += 150) {
       const { data, error } = await supabaseClient
         .from('sprocket_export_batch_rows')
@@ -422,8 +422,8 @@ export const SprocketImport = () => {
         if (id) waiting.set(id, [...(waiting.get(id) ?? []), r.sent_row])
       }
     }
-    setStoredRows(stored)
-    setCompare(findSprocketChanges(events.flatMap((e) => e.rows), stored, managed, waiting))
+    setStoredRows(ownedRows)
+    setCompare(findSprocketChanges(events.flatMap((e) => e.rows), ownedRows, managed, waiting))
 
     const rawRows = events.flatMap((e) => e.rows)
     const range = fileDateRange(rawRows)
